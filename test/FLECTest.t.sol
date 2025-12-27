@@ -30,16 +30,16 @@ contract FLECTest is Test {
         FLECOneTime agreement = FLECOneTime(agreementAddr);
         
         usdt.approve(agreementAddr, TOTAL_BUDGET);
-        agreement.deposit(); // Dana terkunci [cite: 56, 167]
+        agreement.deposit(); // Dana terkunci
         vm.stopPrank();
 
         // Freelancer submit
         vm.prank(freelancer);
-        agreement.submitWork(); // [cite: 76, 175]
+        agreement.submitWork();
 
         // Company approve
         vm.prank(company);
-        agreement.approveAndRelease(); // [cite: 62, 179]
+        agreement.approveAndRelease();
 
         assertEq(usdt.balanceOf(freelancer), TOTAL_BUDGET);
         assertEq(uint(agreement.status()), 2); // Completed
@@ -57,11 +57,11 @@ contract FLECTest is Test {
         vm.prank(freelancer);
         agreement.submitWork();
 
-        // Percepat waktu melewati window 3 hari [cite: 368]
+        // Percepat waktu melewati window 3 hari
         vm.warp(block.timestamp + 4 days);
 
         vm.prank(freelancer);
-        agreement.triggerAutoRelease(); // Auto-pay [cite: 187, 373]
+        agreement.triggerAutoRelease(); // Auto-pay
 
         assertEq(usdt.balanceOf(freelancer), TOTAL_BUDGET);
     }
@@ -74,14 +74,14 @@ contract FLECTest is Test {
         
         uint256 m1 = 400 * 10**18;
         uint256 m2 = 600 * 10**18;
-        agreement.addMilestone(m1); // [cite: 60, 158]
+        agreement.addMilestone(m1); 
         agreement.addMilestone(m2);
         
         usdt.approve(address(agreement), TOTAL_BUDGET);
         agreement.deposit();
 
         // Release Milestone 1
-        agreement.approveMilestone(); // [cite: 189]
+        agreement.approveMilestone();
         vm.stopPrank();
 
         assertEq(usdt.balanceOf(freelancer), m1);
@@ -98,10 +98,10 @@ contract FLECTest is Test {
         agreement.deposit();
         vm.stopPrank();
 
-        // Maju 30 hari [cite: 182]
+        // Maju 30 hari
         vm.warp(block.timestamp + 31 days);
 
-        agreement.triggerPayroll(); // Pembayaran gaji otomatis [cite: 65, 182]
+        agreement.triggerPayroll(); // Pembayaran gaji otomatis
         
         assertEq(usdt.balanceOf(freelancer), TOTAL_BUDGET / 12);
     }
@@ -114,13 +114,13 @@ contract FLECTest is Test {
         usdt.approve(address(agreement), TOTAL_BUDGET);
         agreement.deposit();
 
-        // Terjadi konflik [cite: 208, 383]
-        agreement.triggerDispute(); // Status DISPUTED [cite: 209, 389]
+        // Terjadi konflik
+        agreement.triggerDispute(); // Status DISPUTED
         vm.stopPrank();
 
         // Coba release dana saat dispute (harus gagal)
         vm.prank(company);
         vm.expectRevert(); 
-        agreement.approveAndRelease(); // Dana tetap terkunci [cite: 210, 396]
+        agreement.approveAndRelease(); // Dana tetap terkunci
     }
 }
