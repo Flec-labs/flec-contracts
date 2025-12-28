@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/FLECFactory.sol";
-import "./utils/MockToken.sol"; // Pastikan kamu punya file MockToken sederhana
+import "./utils/MockToken.sol"; 
 
 abstract contract BaseTest is Test {
     FLECFactory public factory;
