@@ -2,16 +2,17 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol"; // Fix warning: unchecked transfer
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title FLECHub
  * @dev Monolithic Hub for Freelance Agreements: OneTime, Milestone, and Monthly.
+ * Features: Upfront Escrow, Individual Milestone Deadlines, Reject & Cancel Mechanism.
  */
 contract FLECHub is ReentrancyGuard, Ownable {
-    using SafeERC20 for IERC20; // Menggunakan SafeERC20 untuk keamanan transfer
+    using SafeERC20 for IERC20;
 
     enum PType { OneTime, Milestone, Monthly }
     enum Status { Created, Funded, Proposed, Completed, Cancelled }
@@ -20,14 +21,15 @@ contract FLECHub is ReentrancyGuard, Ownable {
         address company;
         address freelancer;
         address token;
-        uint256 totalBudget;        // Dana total yang dikunci di awal (Upfront)
-        uint256 amountReleased;     // Akumulasi dana yang sudah cair
-        uint256 lastPaymentTime;    // Timestamp untuk kontrol Monthly
-        uint256 monthlyRate;        // Dana per bulan (khusus Monthly)
+        uint256 totalBudget;
+        uint256 amountReleased;
+        uint256 lastPaymentTime;
+        uint256 monthlyRate;
+        uint256[] milestoneDeadlines; // Array deadline per milestone
         Status status;
         PType paymentType;
         string projectName;
-        string currentProofURI;     // Bukti kerja (OneTime/Milestone)
+        string currentProofURI; 
         uint8 totalMilestones;
         uint8 currentMilestone;
     }
@@ -41,23 +43,34 @@ contract FLECHub is ReentrancyGuard, Ownable {
     event AgreementCreated(uint256 indexed id, PType indexed pType, string projectName);
     event FundsLocked(uint256 indexed id, uint256 totalAmount);
     event WorkSubmitted(uint256 indexed id, string proofURI);
+    event WorkRejected(uint256 indexed id, string reason);
+    event AgreementCancelled(uint256 indexed id, uint256 refundAmount);
     event PaymentReleased(uint256 indexed id, uint256 amount);
 
     constructor(address _initialOwner) Ownable(_initialOwner) {}
 
     /**
-     * @dev Tahap 1: Inisialisasi data proyek dan mapping user.
+     * @dev Tahap 1: Inisialisasi Proyek
      */
     function createAgreement(
         address _freelancer,
         address _token,
         uint256 _totalBudget,
         uint256 _monthlyRate,
+        uint256[] memory _milestoneDeadlines,
         PType _pType,
         uint8 _milestoneCount,
         string memory _projectName
     ) external returns (uint256) {
         nextId++;
+        
+        // Validasi jumlah deadline
+        if (_pType == PType.Milestone) {
+            require(_milestoneDeadlines.length == _milestoneCount, "Deadline count mismatch");
+        } else if (_pType == PType.OneTime) {
+            require(_milestoneDeadlines.length == 1, "OneTime needs 1 deadline");
+        }
+
         agreements[nextId] = Agreement({
             company: msg.sender,
             freelancer: _freelancer,
@@ -66,6 +79,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
             amountReleased: 0,
             lastPaymentTime: 0,
             monthlyRate: _pType == PType.Monthly ? _monthlyRate : 0,
+            milestoneDeadlines: _pType == PType.Monthly ? new uint256[](0) : _milestoneDeadlines,
             status: Status.Created,
             paymentType: _pType,
             projectName: _projectName,
@@ -82,24 +96,22 @@ contract FLECHub is ReentrancyGuard, Ownable {
     }
 
     /**
-     * @dev Tahap 2: Deposit 100% budget di muka (Upfront Escrow).
+     * @dev Tahap 2: Deposit 100% upfront
      */
     function deposit(uint256 _id) external nonReentrant {
         Agreement storage ag = agreements[_id];
         require(ag.status == Status.Created, "Sudah didanai");
         require(msg.sender == ag.company, "Hanya company");
         
-        // Menggunakan safeTransferFrom untuk fix warning build
         IERC20(ag.token).safeTransferFrom(msg.sender, address(this), ag.totalBudget);
 
         ag.status = Status.Funded;
-        ag.lastPaymentTime = block.timestamp; // Start timer untuk Monthly
-        
+        ag.lastPaymentTime = block.timestamp;
         emit FundsLocked(_id, ag.totalBudget);
     }
 
     /**
-     * @dev Tahap 3: Submit Work (Wajib untuk OneTime & Milestone, Monthly tidak perlu).
+     * @dev Tahap 3: Submit Work dengan validasi deadline per milestone
      */
     function submitWork(uint256 _id, string memory _proofURI) external {
         Agreement storage ag = agreements[_id];
@@ -107,13 +119,51 @@ contract FLECHub is ReentrancyGuard, Ownable {
         require(ag.paymentType != PType.Monthly, "Monthly gausah proof");
         require(ag.status == Status.Funded, "Status salah");
 
+        // Pengecekan deadline aktif
+        uint256 activeDeadline = ag.milestoneDeadlines[ag.currentMilestone];
+        require(block.timestamp <= activeDeadline, "Melewati deadline milestone ini!");
+
         ag.currentProofURI = _proofURI;
         ag.status = Status.Proposed;
         emit WorkSubmitted(_id, _proofURI);
     }
 
     /**
-     * @dev Tahap 4: Pencairan dana dengan logika Anti-Rounding (Sweep Balance).
+     * @dev FUNGSI REJECT: Company menolak bukti kerja
+     */
+    function rejectWork(uint256 _id, string memory _reason) external {
+        Agreement storage ag = agreements[_id];
+        require(msg.sender == ag.company, "Hanya company");
+        require(ag.status == Status.Proposed, "Belum ada kiriman kerjaan");
+
+        ag.status = Status.Funded;
+        ag.currentProofURI = ""; // Reset proof
+
+        emit WorkRejected(_id, _reason);
+    }
+
+    /**
+     * @dev FUNGSI CANCEL: Company tarik refund jika telat deadline
+     */
+    function cancelAgreement(uint256 _id) external nonReentrant {
+        Agreement storage ag = agreements[_id];
+        require(msg.sender == ag.company, "Hanya company");
+        require(ag.status != Status.Completed && ag.status != Status.Cancelled, "Sudah selesai");
+
+        if (ag.paymentType != PType.Monthly) {
+            uint256 activeDeadline = ag.milestoneDeadlines[ag.currentMilestone];
+            require(block.timestamp > activeDeadline, "Belum melewati deadline");
+        }
+
+        uint256 refundAmount = ag.totalBudget - ag.amountReleased;
+        ag.status = Status.Cancelled;
+
+        IERC20(ag.token).safeTransfer(ag.company, refundAmount);
+        emit AgreementCancelled(_id, refundAmount);
+    }
+
+    /**
+     * @dev Tahap 4: Release Payment (Accept & Pay)
      */
     function releasePayment(uint256 _id) external nonReentrant {
         Agreement storage ag = agreements[_id];
@@ -125,7 +175,6 @@ contract FLECHub is ReentrancyGuard, Ownable {
             require(ag.status == Status.Funded, "Status tidak valid");
             require(block.timestamp >= ag.lastPaymentTime + 30 days, "Belum 30 hari");
             
-            // Logika Anti-Rounding: Jika ini bulan terakhir, ambil sisa saldo pool
             if (ag.amountReleased + ag.monthlyRate >= ag.totalBudget) {
                 payAmount = ag.totalBudget - ag.amountReleased;
                 ag.status = Status.Completed;
@@ -144,38 +193,27 @@ contract FLECHub is ReentrancyGuard, Ownable {
             else if (ag.paymentType == PType.Milestone) {
                 ag.currentMilestone++;
                 
-                // Logika Anti-Rounding: Milestone terakhir ambil sisa balance agar pool kosong (0)
                 if (ag.currentMilestone == ag.totalMilestones) {
                     payAmount = ag.totalBudget - ag.amountReleased;
                     ag.status = Status.Completed;
                 } else {
                     payAmount = ag.totalBudget / ag.totalMilestones;
-                    ag.status = Status.Funded; // Kembali ke Funded untuk submit proof tahap berikutnya
+                    ag.status = Status.Funded;
                 }
             }
-            ag.currentProofURI = ""; // Reset proof setelah dibayar
+            ag.currentProofURI = ""; 
         }
 
         ag.amountReleased += payAmount;
-        
-        // Menggunakan safeTransfer untuk mengirim dana dari kontrak ke freelancer
         IERC20(ag.token).safeTransfer(ag.freelancer, payAmount);
-        
         emit PaymentReleased(_id, payAmount);
     }
 
     // --- FRONT-END HELPERS ---
-
-    /**
-     * @dev Mengambil daftar ID agreement milik user tertentu.
-     */
     function getAgreementsByUser(address _user) external view returns (uint256[] memory) {
         return userAgreements[_user];
     }
 
-    /**
-     * @dev Mengambil data lengkap agreement berdasarkan ID.
-     */
     function getAgreementDetails(uint256 _id) external view returns (Agreement memory) {
         return agreements[_id];
     }
