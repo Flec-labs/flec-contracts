@@ -6,10 +6,6 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-/**
- * @title FLECHub
- * @dev Monolithic Hub for Freelance Agreements: OneTime, Milestone, and Monthly.
- */
 contract FLECHub is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
@@ -28,6 +24,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
         Status status;
         PType paymentType;
         string projectName;
+        string description; 
         string currentProofURI; 
         uint8 totalMilestones;
         uint8 currentMilestone;
@@ -46,6 +43,9 @@ contract FLECHub is ReentrancyGuard, Ownable {
 
     constructor(address _initialOwner) Ownable(_initialOwner) {}
 
+    /**
+     * @dev Tahap 1: Inisialisasi Proyek
+     */
     function createAgreement(
         address _freelancer,
         address _token,
@@ -54,7 +54,8 @@ contract FLECHub is ReentrancyGuard, Ownable {
         uint256[] memory _milestoneDeadlines,
         PType _pType,
         uint8 _milestoneCount,
-        string memory _projectName
+        string memory _projectName,
+        string memory _description // Parameter baru ditambahkan
     ) external returns (uint256) {
         nextId++;
         
@@ -76,6 +77,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
             status: Status.Created,
             paymentType: _pType,
             projectName: _projectName,
+            description: _description, // Penugasan deskripsi
             currentProofURI: "",
             totalMilestones: _pType == PType.Milestone ? _milestoneCount : 0,
             currentMilestone: 0
@@ -87,6 +89,8 @@ contract FLECHub is ReentrancyGuard, Ownable {
         emit AgreementCreated(nextId, _pType, _projectName);
         return nextId;
     }
+
+    // ... (fungsi deposit, submitWork, rejectWork, acceptWork, cancelAgreement tetap sama)
 
     function deposit(uint256 _id) external nonReentrant {
         Agreement storage ag = agreements[_id];

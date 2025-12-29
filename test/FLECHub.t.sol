@@ -41,8 +41,15 @@ contract FLECHubTest is Test {
         uint256 budget = 100 * USDC;
 
         uint256 id = hub.createAgreement(
-            freelancer, address(token), budget, 0, d, 
-            FLECHub.PType.OneTime, 1, "Logo Design"
+            freelancer, 
+            address(token), 
+            budget, 
+            0, 
+            d, 
+            FLECHub.PType.OneTime, 
+            1, 
+            "Logo Design", 
+            "Design a minimalist logo with 3 revisions" // Added Description
         );
 
         token.approve(address(hub), budget);
@@ -59,7 +66,8 @@ contract FLECHubTest is Test {
         hub.releasePayment(id);
 
         assertEq(token.balanceOf(freelancer), 100 * USDC);
-        assertEq(uint(hub.getAgreementDetails(id).status), 4); // Status.Completed
+        assertEq(uint(hub.getAgreementDetails(id).status), 4);
+        assertEq(hub.getAgreementDetails(id).description, "Design a minimalist logo with 3 revisions");
     }
 
     // --- 2. TEST MILESTONE FLOW ---
@@ -72,8 +80,15 @@ contract FLECHubTest is Test {
         d[2] = block.timestamp + 3 weeks;
 
         uint256 id = hub.createAgreement(
-            freelancer, address(token), totalBudget, 0, d, 
-            FLECHub.PType.Milestone, 3, "Web Dev"
+            freelancer, 
+            address(token), 
+            totalBudget, 
+            0, 
+            d, 
+            FLECHub.PType.Milestone, 
+            3, 
+            "Web Dev",
+            "Develop a landing page, dashboard, and API integration" // Added Description
         );
 
         token.approve(address(hub), totalBudget);
@@ -92,7 +107,7 @@ contract FLECHubTest is Test {
         }
 
         assertEq(token.balanceOf(freelancer), 100 * USDC);
-        assertEq(uint(hub.getAgreementDetails(id).status), 4); // Status.Completed
+        assertEq(uint(hub.getAgreementDetails(id).status), 4);
     }
 
     // --- 3. TEST REJECT ---
@@ -100,7 +115,17 @@ contract FLECHubTest is Test {
         vm.startPrank(company);
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
-        uint256 id = hub.createAgreement(freelancer, address(token), 10 * USDC, 0, d, FLECHub.PType.OneTime, 1, "Art");
+        uint256 id = hub.createAgreement(
+            freelancer, 
+            address(token), 
+            10 * USDC, 
+            0, 
+            d, 
+            FLECHub.PType.OneTime, 
+            1, 
+            "Art", 
+            "Digital illustration task" // Added Description
+        );
         token.approve(address(hub), 10 * USDC);
         hub.deposit(id);
         vm.stopPrank();
@@ -111,7 +136,7 @@ contract FLECHubTest is Test {
         vm.prank(company);
         hub.rejectWork(id, "Revision needed: poor quality");
 
-        assertEq(uint(hub.getAgreementDetails(id).status), 1); // Status.Funded
+        assertEq(uint(hub.getAgreementDetails(id).status), 1);
     }
 
     // --- 4. TEST CANCEL (DEADLINE) ---
@@ -119,7 +144,17 @@ contract FLECHubTest is Test {
         vm.startPrank(company);
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 days;
-        uint256 id = hub.createAgreement(freelancer, address(token), 100 * USDC, 0, d, FLECHub.PType.OneTime, 1, "App");
+        uint256 id = hub.createAgreement(
+            freelancer, 
+            address(token), 
+            100 * USDC, 
+            0, 
+            d, 
+            FLECHub.PType.OneTime, 
+            1, 
+            "App", 
+            "Mobile app development" // Added Description
+        );
         token.approve(address(hub), 100 * USDC);
         hub.deposit(id);
 
@@ -130,27 +165,34 @@ contract FLECHubTest is Test {
         uint256 balAfter = token.balanceOf(company);
 
         assertEq(balAfter - balBefore, 100 * USDC);
-        assertEq(uint(hub.getAgreementDetails(id).status), 5); // Status.Cancelled
+        assertEq(uint(hub.getAgreementDetails(id).status), 5);
         vm.stopPrank();
     }
 
-    // --- 5. TEST REVERT MESSAGES (Standard Foundry Terbaru) ---
+    // --- 5. TEST REVERT MESSAGES ---
     
     function test_RevertWhen_SubmitWorkAfterDeadline() public {
         vm.startPrank(company);
         uint256[] memory d = new uint256[](1);
-        d[0] = block.timestamp + 1 hours; // Deadline 1 jam lagi
-        uint256 id = hub.createAgreement(freelancer, address(token), 10 * USDC, 0, d, FLECHub.PType.OneTime, 1, "Quick Task");
+        d[0] = block.timestamp + 1 hours;
+        uint256 id = hub.createAgreement(
+            freelancer, 
+            address(token), 
+            10 * USDC, 
+            0, 
+            d, 
+            FLECHub.PType.OneTime, 
+            1, 
+            "Quick Task", 
+            "Needs to be done fast" // Added Description
+        );
         token.approve(address(hub), 10 * USDC);
         hub.deposit(id);
         vm.stopPrank();
 
-        // Majukan waktu melewati deadline (2 jam kemudian)
         vm.warp(block.timestamp + 2 hours);
 
-        // Beritahu Foundry bahwa transaksi setelah ini HARUS revert dengan pesan ini
         vm.expectRevert("Milestone deadline exceeded");
-        
         vm.prank(freelancer);
         hub.submitWork(id, "late-proof");
     }
@@ -159,7 +201,17 @@ contract FLECHubTest is Test {
         vm.startPrank(company);
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
-        uint256 id = hub.createAgreement(freelancer, address(token), 10 * USDC, 0, d, FLECHub.PType.OneTime, 1, "Art");
+        uint256 id = hub.createAgreement(
+            freelancer, 
+            address(token), 
+            10 * USDC, 
+            0, 
+            d, 
+            FLECHub.PType.OneTime, 
+            1, 
+            "Art", 
+            "Illustration" // Added Description
+        );
         token.approve(address(hub), 10 * USDC);
         hub.deposit(id);
         vm.stopPrank();
@@ -167,9 +219,7 @@ contract FLECHubTest is Test {
         vm.prank(freelancer);
         hub.submitWork(id, "proof");
 
-        // Harusnya revert karena status masih Proposed, belum Accepted
         vm.expectRevert("Work must be accepted by company first");
-        
         vm.prank(freelancer);
         hub.releasePayment(id);
     }
@@ -178,13 +228,21 @@ contract FLECHubTest is Test {
         vm.startPrank(company);
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
-        uint256 id = hub.createAgreement(freelancer, address(token), 10 * USDC, 0, d, FLECHub.PType.OneTime, 1, "Art");
+        uint256 id = hub.createAgreement(
+            freelancer, 
+            address(token), 
+            10 * USDC, 
+            0, 
+            d, 
+            FLECHub.PType.OneTime, 
+            1, 
+            "Art", 
+            "Illustration" // Added Description
+        );
         vm.stopPrank();
 
-        // Harusnya revert karena Freelancer (address 3) mencoba deposit
         vm.expectRevert("Only the company can deposit");
-        
-        vm.prank(freelancer); 
+        vm.prank(freelancer);
         hub.deposit(id);
     }
 }
