@@ -15,8 +15,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
     enum PType { OneTime, Milestone, Monthly }
-    enum Status { Created, Funded, Proposed, Completed, Cancelled }
-
+    enum Status { Created, Funded, Proposed, Accepted, Completed, Cancelled }
     struct Agreement {
         address company;
         address freelancer;
@@ -141,6 +140,17 @@ contract FLECHub is ReentrancyGuard, Ownable {
 
         emit WorkRejected(_id, _reason);
     }
+    /**
+    * @dev FUNGSI ACCEPT: Company menyetujui bukti kerja
+    */
+    function acceptWork(uint256 _id) external {
+        Agreement storage ag = agreements[_id];
+        require(msg.sender == ag.company, "Hanya company");
+        require(ag.status == Status.Proposed, "Belum ada kiriman kerjaan");
+
+        ag.status = Status.Accepted;
+        // Emit event baru jika perlu: emit WorkAccepted(_id);
+    }
 
     /**
      * @dev FUNGSI CANCEL: Company tarik refund jika telat deadline
@@ -163,11 +173,14 @@ contract FLECHub is ReentrancyGuard, Ownable {
     }
 
     /**
-     * @dev Tahap 4: Release Payment (Accept & Pay)
-     */
+    * @dev Tahap 4: Release Payment (Pencairan Dana)
+    * Sekarang bisa dipanggil Company atau Freelancer (Trustless)
+    */
     function releasePayment(uint256 _id) external nonReentrant {
         Agreement storage ag = agreements[_id];
-        require(msg.sender == ag.company, "Hanya company");
+        
+        // Validasi Dasar: Hanya pihak terlibat yang bisa memicu
+        require(msg.sender == ag.company || msg.sender == ag.freelancer, "Bukan pihak terlibat");
         
         uint256 payAmount;
 
@@ -184,7 +197,8 @@ contract FLECHub is ReentrancyGuard, Ownable {
             }
         } 
         else {
-            require(ag.status == Status.Proposed, "Wajib submit proof dulu");
+            // UNTUK ONETIME & MILESTONE: Wajib berstatus Accepted (Sudah disetujui Company)
+            require(ag.status == Status.Accepted, "Pekerjaan belum di-accept Company");
             
             if (ag.paymentType == PType.OneTime) {
                 payAmount = ag.totalBudget;
@@ -198,10 +212,11 @@ contract FLECHub is ReentrancyGuard, Ownable {
                     ag.status = Status.Completed;
                 } else {
                     payAmount = ag.totalBudget / ag.totalMilestones;
-                    ag.status = Status.Funded;
+                    // Balik ke Funded agar freelancer bisa submit milestone berikutnya
+                    ag.status = Status.Funded; 
                 }
             }
-            ag.currentProofURI = ""; 
+            ag.currentProofURI = ""; // Bersihkan bukti lama
         }
 
         ag.amountReleased += payAmount;
