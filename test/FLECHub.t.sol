@@ -52,7 +52,8 @@ contract FLECHubTest is Test {
             "Design a minimalist logo with 3 revisions" // Added Description
         );
 
-        token.approve(address(hub), budget);
+        uint256 fee = hub.calculateExecutionFee(address(token), budget);
+        token.approve(address(hub), budget + fee);
         hub.deposit(id);
         vm.stopPrank();
 
@@ -91,7 +92,8 @@ contract FLECHubTest is Test {
             "Develop a landing page, dashboard, and API integration" // Added Description
         );
 
-        token.approve(address(hub), totalBudget);
+        uint256 fee = hub.calculateExecutionFee(address(token), totalBudget);
+        token.approve(address(hub), totalBudget + fee);
         hub.deposit(id);
         vm.stopPrank();
 
@@ -126,7 +128,8 @@ contract FLECHubTest is Test {
             "Art", 
             "Digital illustration task" // Added Description
         );
-        token.approve(address(hub), 10 * USDC);
+        uint256 fee = hub.calculateExecutionFee(address(token), 10 * USDC);
+        token.approve(address(hub), 10 * USDC + fee);
         hub.deposit(id);
         vm.stopPrank();
 
@@ -155,7 +158,8 @@ contract FLECHubTest is Test {
             "App", 
             "Mobile app development" // Added Description
         );
-        token.approve(address(hub), 100 * USDC);
+        uint256 fee = hub.calculateExecutionFee(address(token), 100 * USDC);
+        token.approve(address(hub), 100 * USDC + fee);
         hub.deposit(id);
 
         vm.warp(block.timestamp + 2 days);
@@ -186,7 +190,8 @@ contract FLECHubTest is Test {
             "Quick Task", 
             "Needs to be done fast" // Added Description
         );
-        token.approve(address(hub), 10 * USDC);
+        uint256 fee = hub.calculateExecutionFee(address(token), 10 * USDC);
+        token.approve(address(hub), 10 * USDC + fee);
         hub.deposit(id);
         vm.stopPrank();
 
@@ -212,7 +217,8 @@ contract FLECHubTest is Test {
             "Art", 
             "Illustration" // Added Description
         );
-        token.approve(address(hub), 10 * USDC);
+        uint256 fee = hub.calculateExecutionFee(address(token), 10 * USDC);
+        token.approve(address(hub), 10 * USDC + fee);
         hub.deposit(id);
         vm.stopPrank();
 
