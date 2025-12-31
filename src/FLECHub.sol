@@ -23,6 +23,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
     struct Agreement {
         address company;
         address freelancer;
+        address arbitrator;
         address token;
 
         uint256 totalBudget;      // escrow budget (excludes execution fee)
@@ -34,8 +35,9 @@ contract FLECHub is ReentrancyGuard, Ownable {
 
         // OneTime / Milestone scheduling
         uint256[] milestoneDeadlines;
-        uint8 totalMilestones;
         uint8 currentMilestone;
+        uint8 rejectsThisMilestone;
+        uint256 firstSubmittedAt;  // timestamp of first submission for current milestone (for grace period)
 
         // Workflow status
         Status status;
@@ -67,6 +69,8 @@ contract FLECHub is ReentrancyGuard, Ownable {
 
     // ===== Rule config =====
     uint256 public approvalTimeout = 7 days; // auto-release if company doesn't respond after submission
+    uint8 public maxRejectsPerMilestone = 3;
+    uint256 public resubmissionGrace = 2 days; // grace period to resubmit after rejection
 
     // ===== Events =====
     event AgreementCreated(uint256 indexed id, PType indexed pType, string projectName);
@@ -88,9 +92,16 @@ contract FLECHub is ReentrancyGuard, Ownable {
     event FeeConfigUpdated(uint16 feeBps, uint256 minFeeUsd, uint256 maxFeeUsd);
     event TreasuryUpdated(address treasury);
     event ApprovalTimeoutUpdated(uint256 approvalTimeout);
+    event ArbitratorSet(uint256 indexed id, address indexed arbitrator);
+    event ResubmissionGraceUpdated(uint256 resubmissionGrace);
 
     constructor(address _initialOwner) Ownable(_initialOwner) {
         treasury = _initialOwner;
+    }
+
+    modifier onlyArbitrator(uint256 _id) {
+        require(msg.sender == agreements[_id].arbitrator, "Not arbitrator");
+        _;
     }
 
     // ===== Admin =====
@@ -113,6 +124,17 @@ contract FLECHub is ReentrancyGuard, Ownable {
         require(_approvalTimeout >= 1 hours, "timeout too small");
         approvalTimeout = _approvalTimeout;
         emit ApprovalTimeoutUpdated(_approvalTimeout);
+    }
+
+    function setMaxRejectsPerMilestone(uint8 _maxRejects) external onlyOwner {
+        require(_maxRejects > 0 && _maxRejects <= 10, "Invalid max rejects");
+        maxRejectsPerMilestone = _maxRejects;
+    }
+
+    function setResubmissionGrace(uint256 _grace) external onlyOwner {
+        require(_grace > 0 && _grace <= 30 days, "Invalid grace period");
+        resubmissionGrace = _grace;
+        emit ResubmissionGraceUpdated(_grace);
     }
 
     // ===== Fee math =====
@@ -143,26 +165,25 @@ contract FLECHub is ReentrancyGuard, Ownable {
         uint256 _monthlyRate,
         uint256[] memory _milestoneDeadlines,
         PType _pType,
-        uint8 _milestoneCount,
         string memory _projectName,
-        string memory _description
+        string memory _description,
+        address _arbitrator
     ) external returns (uint256) {
         require(_freelancer != address(0), "Freelancer is zero address");
         require(_token != address(0), "Token is zero address");
         require(_totalBudget > 0, "Total budget must be > 0");
+        require(_arbitrator != address(0), "Arbitrator is zero");
 
         if (_pType == PType.Monthly) {
             require(_monthlyRate > 0, "Monthly rate must be > 0");
             require(_monthlyRate <= _totalBudget, "Monthly rate exceeds budget");
             require(_milestoneDeadlines.length == 0, "Monthly: deadlines must be empty");
-            require(_milestoneCount == 0, "Monthly: milestoneCount must be 0");
         } else if (_pType == PType.OneTime) {
             require(_milestoneDeadlines.length == 1, "OneTime needs 1 deadline");
             require(_milestoneDeadlines[0] > block.timestamp, "Deadline must be in future");
         } else {
             // Milestone
-            require(_milestoneCount > 0, "Milestones must be > 0");
-            require(_milestoneDeadlines.length == _milestoneCount, "Deadline count mismatch");
+            require(_milestoneDeadlines.length > 0, "Milestones must be > 0");
 
             // deadlines must be strictly increasing and in the future
             require(_milestoneDeadlines[0] > block.timestamp, "Deadline must be in future");
@@ -176,6 +197,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
         agreements[nextId] = Agreement({
             company: msg.sender,
             freelancer: _freelancer,
+            arbitrator: _arbitrator,
             token: _token,
 
             totalBudget: _totalBudget,
@@ -185,8 +207,9 @@ contract FLECHub is ReentrancyGuard, Ownable {
             monthlyRate: _pType == PType.Monthly ? _monthlyRate : 0,
 
             milestoneDeadlines: _pType == PType.Monthly ? new uint256[](0) : _milestoneDeadlines,
-            totalMilestones: _pType == PType.Milestone ? _milestoneCount : 0,
             currentMilestone: 0,
+            rejectsThisMilestone: 0,
+            firstSubmittedAt: 0,
 
             status: Status.Created,
             paymentType: _pType,
@@ -205,6 +228,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
         userAgreements[_freelancer].push(nextId);
 
         emit AgreementCreated(nextId, _pType, _projectName);
+        emit ArbitratorSet(nextId, _arbitrator);
         return nextId;
     }
 
@@ -242,9 +266,22 @@ contract FLECHub is ReentrancyGuard, Ownable {
         require(msg.sender == ag.freelancer, "Caller is not the freelancer");
         require(ag.paymentType != PType.Monthly, "Monthly does not require proof");
         require(ag.status == Status.Funded, "Invalid status for submission");
+        require(bytes(_proofURI).length > 0, "Empty proof");
+        require(ag.currentMilestone < ag.milestoneDeadlines.length, "Invalid milestone index");
 
         uint256 activeDeadline = ag.milestoneDeadlines[ag.currentMilestone];
-        require(block.timestamp <= activeDeadline, "Milestone deadline exceeded");
+        
+        // If first submission for this milestone, record timestamp and enforce original deadline
+        if (ag.firstSubmittedAt == 0) {
+            require(block.timestamp <= activeDeadline, "Milestone deadline exceeded");
+            ag.firstSubmittedAt = block.timestamp;
+        } else {
+            // Resubmission allowed until max(originalDeadline, firstSubmit + grace)
+            // This ensures early submitters keep their deadline advantage while late rejects get grace extension
+            uint256 gracefulDeadline = ag.firstSubmittedAt + resubmissionGrace;
+            uint256 effectiveDeadline = activeDeadline > gracefulDeadline ? activeDeadline : gracefulDeadline;
+            require(block.timestamp <= effectiveDeadline, "Resubmission window expired");
+        }
 
         ag.currentProofURI = _proofURI;
         ag.submittedAt = block.timestamp;
@@ -259,12 +296,20 @@ contract FLECHub is ReentrancyGuard, Ownable {
         require(ag.status != Status.Disputed, "Agreement is disputed");
         require(msg.sender == ag.company, "Only the company can reject work");
         require(ag.status == Status.Proposed, "No work submitted for review");
+        require(ag.rejectsThisMilestone < maxRejectsPerMilestone, "Reject limit reached");
 
         ag.status = Status.Funded;
         ag.currentProofURI = "";
         ag.submittedAt = 0;
+        ag.rejectsThisMilestone += 1;
 
         emit WorkRejected(_id, _reason);
+
+        // If reject limit reached, auto-escalate to dispute
+        if (ag.rejectsThisMilestone >= maxRejectsPerMilestone) {
+            ag.status = Status.Disputed;
+            emit AgreementDisputed(_id, msg.sender, "Reject limit reached");
+        }
     }
 
     function acceptWork(uint256 _id) external {
@@ -312,8 +357,18 @@ contract FLECHub is ReentrancyGuard, Ownable {
             return;
         }
 
-        // For non-monthly, enforce deadline-based cancellation (current milestone deadline must pass)
-        if (ag.paymentType != PType.Monthly) {
+        // Can only cancel when Funded (not during Proposed/Accepted)
+        require(ag.status == Status.Funded, "Can only cancel when Funded");
+
+        // For monthly, enforce cycle-based cancellation (must wait 30 days from last payment)
+        if (ag.paymentType == PType.Monthly) {
+            require(block.timestamp >= ag.lastPaymentTime + 30 days, "Monthly: cannot cancel mid-cycle");
+        } else {
+            // For non-monthly, prevent cancel after work submission (must dispute instead)
+            require(ag.firstSubmittedAt == 0, "Cannot cancel after submission, use dispute");
+            
+            // Enforce deadline-based cancellation
+            require(ag.currentMilestone < ag.milestoneDeadlines.length, "Invalid milestone index");
             uint256 activeDeadline = ag.milestoneDeadlines[ag.currentMilestone];
             require(block.timestamp > activeDeadline, "Cannot cancel before deadline");
         }
@@ -333,12 +388,20 @@ contract FLECHub is ReentrancyGuard, Ownable {
         require(ag.status != Status.Disputed, "Already disputed");
         require(ag.status != Status.Created, "Not funded yet");
 
+        // Prevent dispute abuse to block auto-release
+        if (ag.status == Status.Proposed) {
+            require(
+                ag.submittedAt != 0 && block.timestamp < ag.submittedAt + approvalTimeout,
+                "Too late to dispute"
+            );
+        }
+
         ag.status = Status.Disputed;
         emit AgreementDisputed(_id, msg.sender, _reason);
     }
 
     /**
-     * Owner-mediated resolution (MVP-safe): splits remaining escrow budget (fee stays non-refundable).
+     * Arbitrator-mediated resolution: splits remaining escrow budget (fee stays non-refundable).
      * - remaining = totalBudget - amountReleased
      * - payToFreelancer + refundToCompany must equal remaining
      * After resolution, agreement is finalized (Completed or Cancelled).
@@ -347,7 +410,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
         uint256 _id,
         uint256 payToFreelancer,
         uint256 refundToCompany
-    ) external onlyOwner nonReentrant {
+    ) external onlyArbitrator(_id) nonReentrant {
         Agreement storage ag = agreements[_id];
 
         require(ag.status == Status.Disputed, "Not disputed");
@@ -367,6 +430,8 @@ contract FLECHub is ReentrancyGuard, Ownable {
         // Finalize
         ag.currentProofURI = "";
         ag.submittedAt = 0;
+        ag.firstSubmittedAt = 0;
+        ag.rejectsThisMilestone = 0;
 
         if (refundToCompany == remaining) {
             ag.status = Status.Cancelled;
@@ -411,17 +476,20 @@ contract FLECHub is ReentrancyGuard, Ownable {
             } else if (ag.paymentType == PType.Milestone) {
                 ag.currentMilestone++;
 
-                if (ag.currentMilestone == ag.totalMilestones) {
+                uint256 totalMilestones = ag.milestoneDeadlines.length;
+                if (ag.currentMilestone == totalMilestones) {
                     payAmount = ag.totalBudget - ag.amountReleased;
                     ag.status = Status.Completed;
                 } else {
-                    payAmount = ag.totalBudget / ag.totalMilestones;
+                    payAmount = ag.totalBudget / totalMilestones;
                     ag.status = Status.Funded;
                 }
             }
 
             ag.currentProofURI = "";
             ag.submittedAt = 0;
+            ag.firstSubmittedAt = 0;
+            ag.rejectsThisMilestone = 0;
         }
 
         ag.amountReleased += payAmount;

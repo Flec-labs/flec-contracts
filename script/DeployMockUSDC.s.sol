@@ -13,9 +13,9 @@ contract DeployMockUSDC is Script {
         address deployer = vm.addr(pk);
 
         // Default config (bisa kamu ubah)
-        uint256 dripAmount = 1_000e6;      // 1,000 mUSDC
+        uint256 dripAmount = 10_000e6;      // 10,000 mUSDC
         uint48 cooldown = 24 hours;
-        uint256 maxBalance = 10_000e6;     // max 10,000 mUSDC di wallet
+        uint256 maxBalance = 100_000e6;     // max 100,000 mUSDC di wallet
 
         vm.startBroadcast(pk);
 
