@@ -16,6 +16,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 contract FLECHub is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
+    error UnsupportedDecimals();
+
     enum PType { OneTime, Milestone, Monthly }
     // NOTE: Disputed appended at the end to avoid shifting existing enum values (for new deployments only).
     enum Status { Created, Funded, Proposed, Accepted, Completed, Cancelled, Disputed }
@@ -169,7 +171,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
 
         // Convert USD min/max guardrails into token units using token decimals
         uint8 dec = IERC20Metadata(_token).decimals();
-        require(dec <= 18, "Unsupported decimals");
+        if (dec > 18) revert UnsupportedDecimals();
         uint256 scale = 10 ** uint256(dec);
 
         uint256 minFee = minFeeUsd * scale;
@@ -284,7 +286,12 @@ contract FLECHub is ReentrancyGuard, Ownable {
     }
 
     // ===== Proof submission / review =====
-    function submitWork(uint256 _id, string memory _proofURI) external validAgreement(_id) onlyFreelancer(_id) {
+    function submitWork(uint256 _id, string memory _proofURI)
+        external
+        validAgreement(_id)
+        onlyFreelancer(_id)
+        nonReentrant
+    {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
@@ -314,7 +321,12 @@ contract FLECHub is ReentrancyGuard, Ownable {
         emit WorkSubmitted(_id, _proofURI);
     }
 
-    function rejectWork(uint256 _id, string memory _reason) external validAgreement(_id) onlyCompany(_id) {
+    function rejectWork(uint256 _id, string memory _reason)
+        external
+        validAgreement(_id)
+        onlyCompany(_id)
+        nonReentrant
+    {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
@@ -335,7 +347,12 @@ contract FLECHub is ReentrancyGuard, Ownable {
         }
     }
 
-    function acceptWork(uint256 _id) external validAgreement(_id) onlyCompany(_id) {
+    function acceptWork(uint256 _id)
+        external
+        validAgreement(_id)
+        onlyCompany(_id)
+        nonReentrant
+    {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
@@ -397,7 +414,9 @@ contract FLECHub is ReentrancyGuard, Ownable {
         uint256 refundAmount = ag.totalBudget - ag.amountReleased;
         ag.status = Status.Cancelled;
 
-        IERC20(ag.token).safeTransfer(ag.company, refundAmount);
+        if (refundAmount > 0) {
+            IERC20(ag.token).safeTransfer(ag.company, refundAmount);
+        }
         emit AgreementCancelled(_id, refundAmount);
     }
 
@@ -512,9 +531,11 @@ contract FLECHub is ReentrancyGuard, Ownable {
             ag.rejectsThisMilestone = 0;
         }
 
-        ag.amountReleased += payAmount;
-        IERC20(ag.token).safeTransfer(ag.freelancer, payAmount);
-        emit PaymentReleased(_id, payAmount);
+        if (payAmount > 0) {
+            ag.amountReleased += payAmount;
+            IERC20(ag.token).safeTransfer(ag.freelancer, payAmount);
+            emit PaymentReleased(_id, payAmount);
+        }
 
         if (ag.status == Status.Completed) {
             emit AgreementCompleted(_id);
