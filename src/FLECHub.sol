@@ -93,6 +93,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
     event TreasuryUpdated(address treasury);
     event ApprovalTimeoutUpdated(uint256 approvalTimeout);
     event ArbitratorSet(uint256 indexed id, address indexed arbitrator);
+    event MaxRejectsUpdated(uint8 maxRejects);
     event ResubmissionGraceUpdated(uint256 resubmissionGrace);
 
     constructor(address _initialOwner) Ownable(_initialOwner) {
@@ -101,6 +102,29 @@ contract FLECHub is ReentrancyGuard, Ownable {
 
     modifier onlyArbitrator(uint256 _id) {
         require(msg.sender == agreements[_id].arbitrator, "Not arbitrator");
+        _;
+    }
+
+    modifier validAgreement(uint256 _id) {
+        require(agreements[_id].company != address(0), "Invalid agreement");
+        _;
+    }
+
+    modifier onlyCompany(uint256 _id) {
+        require(msg.sender == agreements[_id].company, "Only company");
+        _;
+    }
+
+    modifier onlyFreelancer(uint256 _id) {
+        require(msg.sender == agreements[_id].freelancer, "Only freelancer");
+        _;
+    }
+
+    modifier onlyParty(uint256 _id) {
+        require(
+            msg.sender == agreements[_id].company || msg.sender == agreements[_id].freelancer,
+            "Not a party"
+        );
         _;
     }
 
@@ -129,6 +153,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
     function setMaxRejectsPerMilestone(uint8 _maxRejects) external onlyOwner {
         require(_maxRejects > 0 && _maxRejects <= 10, "Invalid max rejects");
         maxRejectsPerMilestone = _maxRejects;
+        emit MaxRejectsUpdated(_maxRejects);
     }
 
     function setResubmissionGrace(uint256 _grace) external onlyOwner {
@@ -144,6 +169,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
 
         // Convert USD min/max guardrails into token units using token decimals
         uint8 dec = IERC20Metadata(_token).decimals();
+        require(dec <= 18, "Unsupported decimals");
         uint256 scale = 10 ** uint256(dec);
 
         uint256 minFee = minFeeUsd * scale;
@@ -233,11 +259,10 @@ contract FLECHub is ReentrancyGuard, Ownable {
     }
 
     // ===== Escrow funding (fee collected here) =====
-    function deposit(uint256 _id) external nonReentrant {
+    function deposit(uint256 _id) external validAgreement(_id) onlyCompany(_id) nonReentrant {
         Agreement storage ag = agreements[_id];
 
         require(ag.status == Status.Created, "Agreement not in Created");
-        require(msg.sender == ag.company, "Only the company can deposit");
         require(!ag.feePaid, "Already funded");
 
         uint256 fee = calculateExecutionFee(ag.token, ag.totalBudget);
@@ -259,11 +284,10 @@ contract FLECHub is ReentrancyGuard, Ownable {
     }
 
     // ===== Proof submission / review =====
-    function submitWork(uint256 _id, string memory _proofURI) external {
+    function submitWork(uint256 _id, string memory _proofURI) external validAgreement(_id) onlyFreelancer(_id) {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
-        require(msg.sender == ag.freelancer, "Caller is not the freelancer");
         require(ag.paymentType != PType.Monthly, "Monthly does not require proof");
         require(ag.status == Status.Funded, "Invalid status for submission");
         require(bytes(_proofURI).length > 0, "Empty proof");
@@ -290,11 +314,10 @@ contract FLECHub is ReentrancyGuard, Ownable {
         emit WorkSubmitted(_id, _proofURI);
     }
 
-    function rejectWork(uint256 _id, string memory _reason) external {
+    function rejectWork(uint256 _id, string memory _reason) external validAgreement(_id) onlyCompany(_id) {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
-        require(msg.sender == ag.company, "Only the company can reject work");
         require(ag.status == Status.Proposed, "No work submitted for review");
         require(ag.rejectsThisMilestone < maxRejectsPerMilestone, "Reject limit reached");
 
@@ -312,11 +335,10 @@ contract FLECHub is ReentrancyGuard, Ownable {
         }
     }
 
-    function acceptWork(uint256 _id) external {
+    function acceptWork(uint256 _id) external validAgreement(_id) onlyCompany(_id) {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
-        require(msg.sender == ag.company, "Only the company can accept work");
         require(ag.status == Status.Proposed, "No work submitted to accept");
 
         ag.status = Status.Accepted;
@@ -327,7 +349,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
      * Anyone can trigger this to prevent "ghosting" after the approval timeout.
      * It auto-accepts the submission and releases the corresponding payment.
      */
-    function autoReleaseIfExpired(uint256 _id) external nonReentrant {
+    function autoReleaseIfExpired(uint256 _id) external validAgreement(_id) nonReentrant {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
@@ -343,10 +365,9 @@ contract FLECHub is ReentrancyGuard, Ownable {
     }
 
     // ===== Cancel / dispute =====
-    function cancelAgreement(uint256 _id) external nonReentrant {
+    function cancelAgreement(uint256 _id) external validAgreement(_id) onlyCompany(_id) nonReentrant {
         Agreement storage ag = agreements[_id];
 
-        require(msg.sender == ag.company, "Only the company can cancel");
         require(ag.status != Status.Completed && ag.status != Status.Cancelled, "Agreement already finished");
         require(ag.status != Status.Disputed, "Agreement is disputed");
 
@@ -380,10 +401,9 @@ contract FLECHub is ReentrancyGuard, Ownable {
         emit AgreementCancelled(_id, refundAmount);
     }
 
-    function raiseDispute(uint256 _id, string calldata _reason) external {
+    function raiseDispute(uint256 _id, string calldata _reason) external validAgreement(_id) onlyParty(_id) {
         Agreement storage ag = agreements[_id];
 
-        require(msg.sender == ag.company || msg.sender == ag.freelancer, "Not a party");
         require(ag.status != Status.Completed && ag.status != Status.Cancelled, "Agreement finished");
         require(ag.status != Status.Disputed, "Already disputed");
         require(ag.status != Status.Created, "Not funded yet");
@@ -410,7 +430,7 @@ contract FLECHub is ReentrancyGuard, Ownable {
         uint256 _id,
         uint256 payToFreelancer,
         uint256 refundToCompany
-    ) external onlyArbitrator(_id) nonReentrant {
+    ) external validAgreement(_id) onlyArbitrator(_id) nonReentrant {
         Agreement storage ag = agreements[_id];
 
         require(ag.status == Status.Disputed, "Not disputed");
@@ -444,15 +464,15 @@ contract FLECHub is ReentrancyGuard, Ownable {
     }
 
     // ===== Payment release =====
-    function releasePayment(uint256 _id) external nonReentrant {
+    function releasePayment(uint256 _id) external validAgreement(_id) onlyParty(_id) nonReentrant {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
-        require(msg.sender == ag.company || msg.sender == ag.freelancer, "Not an authorized party");
 
         _releasePaymentInternal(_id, ag);
     }
 
+    // Internal; must be called only from nonReentrant entrypoints.
     function _releasePaymentInternal(uint256 _id, Agreement storage ag) internal {
         uint256 payAmount;
 
