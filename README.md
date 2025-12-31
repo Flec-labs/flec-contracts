@@ -1,66 +1,147 @@
-## Foundry
+# FLEC Smart Contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Programmable Work Agreements on Lisk blockchain.
 
-Foundry consists of:
+---
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+## 🛠️ Tooling
 
-## Documentation
+This repository uses **Foundry** for smart contract development.
 
-https://book.getfoundry.sh/
+Foundry includes:
+- **Forge** – build & testing framework
+- **Cast** – interact with EVM contracts
+- **Anvil** – local dev node
 
-## Usage
+Docs: https://book.getfoundry.sh/
 
-### Build
+---
 
-```shell
-$ forge build
+## 📦 Build & Test (Local)
+
+```bash
+forge build
+forge test
+forge fmt
 ```
 
-### Test
+---
 
-```shell
-$ forge test
+## 🔐 Environment Variables
+
+Create `.env` (do not commit):
+
+```env
+PRIVATE_KEY=<deployer_wallet_private_key>
+RPC_URL=https://rpc.sepolia-api.lisk.com
+ETHERSCAN_API_KEY=any_string
+
+# set after MockUSDC deployment
+USDC_ADDRESS=<mock_usdc_address>
 ```
 
-### Format
+Notes:
+- `PRIVATE_KEY` is used **only for deployment & initial configuration**
+- Use a **dedicated deployer/testnet wallet**
+- `ETHERSCAN_API_KEY` is optional (verification only)
 
-```shell
-$ forge fmt
+---
+
+## 🚀 Deployment Order (Required)
+
+### 1️⃣ Deploy MockUSDC + Faucet
+
+This script:
+- Deploys `MockUSDC`
+- Deploys `MockUSDCFaucet`
+- Grants `MINTER_ROLE` to Faucet automatically
+
+```bash
+forge script script/DeployMockUSDC.s.sol \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  --broadcast
 ```
 
-### Gas Snapshots
+Save deployed addresses:
+- `MockUSDC` → update `USDC_ADDRESS`
+- `MockUSDCFaucet`
 
-```shell
-$ forge snapshot
+---
+
+### 2️⃣ Mint MockUSDC (Judges / Testers)
+
+Judges **do not need minter role**.
+
+Via block explorer:
+1. Open `MockUSDCFaucet`
+2. Go to **Write Contract**
+3. Call:
+   ```
+   drip()
+   ```
+4. Confirm transaction (ETH required)
+
+Wallet receives **mUSDC (rate-limited)**.
+
+---
+
+### 3️⃣ Deploy FLECHub
+
+Ensure `USDC_ADDRESS` is set correctly.
+
+```bash
+forge script script/DeployFLECHub.s.sol \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  --broadcast
 ```
 
-### Anvil
+`FLECHub` handles:
+- Onchain work agreements
+- Escrow & execution fee (upfront)
+- Milestone & monthly payroll
+- Timeout auto-release
+- Dispute lock
 
-```shell
-$ anvil
-```
+---
 
-### Deploy
+## 🔄 Minimal Testnet Flow (Sanity Check)
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
+1. Mint mUSDC via Faucet
+2. Approve mUSDC to `FLECHub`
+   - allowance = `totalBudget + executionFee`
+3. Company creates agreement
+4. Company deposits escrow
+5. Freelancer submits work / waits payroll
+6. Company approves **or** auto-release via timeout
 
-### Cast
+---
 
-```shell
-$ cast <subcommand>
-```
+## ⛽ Gas Requirement
 
-### Help
+- All transactions require **ETH on Lisk Sepolia**
+- Includes faucet, approve, deposit, submit, approve, and cancel
 
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+---
+
+## ℹ️ Notes
+
+- Execution fee is **paid once upfront** and **non-refundable**
+- Fee does **not** reduce freelancer payment
+- When status is `Disputed`, no unilateral execution is allowed
+- `MockUSDC (mUSDC)` is **testnet-only**
+
+---
+
+## ⚠️ Common Pitfalls
+
+- Forgetting to update `USDC_ADDRESS`
+- Wallet has no ETH → transaction fails
+- Insufficient allowance (must include execution fee)
+
+---
+
+## 📄 License
+
+MIT
