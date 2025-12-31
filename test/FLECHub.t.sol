@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.30;
 
 import "forge-std/Test.sol";
 import "../src/FLECHub.sol";
+import "../src/FLECHubErrors.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract MockUSDC is ERC20 {
@@ -258,20 +259,20 @@ contract FLECHubTest is Test {
         );
         vm.stopPrank();
 
-        vm.expectRevert("Only company");
+        vm.expectRevert(abi.encodeWithSelector(FLECHubErrors.OnlyCompany.selector));
         vm.prank(freelancer);
         hub.deposit(id);
     }
 
     function test_RevertWhen_InvalidAgreement() public {
-        vm.expectRevert("Invalid agreement");
+        vm.expectRevert(abi.encodeWithSelector(FLECHubErrors.InvalidAgreement.selector));
         vm.prank(company);
         hub.deposit(999);
     }
 
     function test_RevertWhen_UnsupportedDecimals() public {
         MockBadDecimals bad = new MockBadDecimals();
-        vm.expectRevert(abi.encodeWithSelector(FLECHub.UnsupportedDecimals.selector));
+        vm.expectRevert(abi.encodeWithSelector(FLECHubErrors.UnsupportedDecimals.selector));
         hub.calculateExecutionFee(address(bad), 100 * USDC);
     }
 

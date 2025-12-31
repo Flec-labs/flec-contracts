@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.30;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "./FLECHubErrors.sol";
 
 /**
  * FLECHub
@@ -12,10 +13,8 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  * - Execution fee: 1.5% (150 bps) per agreement, paid upfront at first deposit, non-refundable
  * - Optional: approval-timeout auto-release and dispute lock
  */
-contract FLECHub is ReentrancyGuard {
+contract FLECHub is ReentrancyGuard, FLECHubErrors {
     using SafeERC20 for IERC20;
-
-    error UnsupportedDecimals();
 
     enum PType { OneTime, Milestone, Monthly }
     // NOTE: Disputed appended at the end to avoid shifting existing enum values (for new deployments only).
@@ -72,6 +71,7 @@ contract FLECHub is ReentrancyGuard {
     uint256 public constant approvalTimeout = 7 days; // auto-release if company doesn't respond after submission
     uint8 public constant maxRejectsPerMilestone = 3;
     uint256 public constant resubmissionGrace = 2 days; // grace period to resubmit after rejection
+    uint256 public constant maxMilestones = 50;
 
     // ===== Events =====
     event AgreementCreated(uint256 indexed id, PType indexed pType, string projectName);
@@ -91,36 +91,38 @@ contract FLECHub is ReentrancyGuard {
     event DisputeResolved(uint256 indexed id, uint256 paidToFreelancer, uint256 refundedToCompany);
 
     event ArbitratorSet(uint256 indexed id, address indexed arbitrator);
+    event HubInitialized(address indexed treasury);
 
     constructor(address _initialOwner) {
+        require(_initialOwner != address(0), "Owner is zero");
         treasury = _initialOwner;
+        emit HubInitialized(_initialOwner);
     }
 
     modifier onlyArbitrator(uint256 _id) {
-        require(msg.sender == agreements[_id].arbitrator, "Not arbitrator");
+        if (msg.sender != agreements[_id].arbitrator) revert OnlyArbitrator();
         _;
     }
 
     modifier validAgreement(uint256 _id) {
-        require(agreements[_id].company != address(0), "Invalid agreement");
+        if (agreements[_id].company == address(0)) revert InvalidAgreement();
         _;
     }
 
     modifier onlyCompany(uint256 _id) {
-        require(msg.sender == agreements[_id].company, "Only company");
+        if (msg.sender != agreements[_id].company) revert OnlyCompany();
         _;
     }
 
     modifier onlyFreelancer(uint256 _id) {
-        require(msg.sender == agreements[_id].freelancer, "Only freelancer");
+        if (msg.sender != agreements[_id].freelancer) revert OnlyFreelancer();
         _;
     }
 
     modifier onlyParty(uint256 _id) {
-        require(
-            msg.sender == agreements[_id].company || msg.sender == agreements[_id].freelancer,
-            "Not a party"
-        );
+        if (msg.sender != agreements[_id].company && msg.sender != agreements[_id].freelancer) {
+            revert OnlyParty();
+        }
         _;
     }
 
@@ -172,6 +174,7 @@ contract FLECHub is ReentrancyGuard {
         } else {
             // Milestone
             require(_milestoneDeadlines.length > 0, "Milestones must be > 0");
+            require(_milestoneDeadlines.length <= maxMilestones, "Too many milestones");
 
             // deadlines must be strictly increasing and in the future
             require(_milestoneDeadlines[0] > block.timestamp, "Deadline must be in future");
@@ -221,6 +224,8 @@ contract FLECHub is ReentrancyGuard {
     }
 
     // ===== Escrow funding (fee collected here) =====
+    /// @notice Deposit escrow and pay execution fee.
+    /// @dev Only the agreement company can deposit.
     function deposit(uint256 _id) external validAgreement(_id) onlyCompany(_id) nonReentrant {
         Agreement storage ag = agreements[_id];
 
@@ -246,6 +251,8 @@ contract FLECHub is ReentrancyGuard {
     }
 
     // ===== Proof submission / review =====
+    /// @notice Submit work proof for review.
+    /// @dev Only the assigned freelancer can submit.
     function submitWork(uint256 _id, string memory _proofURI)
         external
         validAgreement(_id)
@@ -281,6 +288,8 @@ contract FLECHub is ReentrancyGuard {
         emit WorkSubmitted(_id, _proofURI);
     }
 
+    /// @notice Reject submitted work with a reason.
+    /// @dev Only the company can reject work.
     function rejectWork(uint256 _id, string memory _reason)
         external
         validAgreement(_id)
@@ -307,6 +316,8 @@ contract FLECHub is ReentrancyGuard {
         }
     }
 
+    /// @notice Accept submitted work.
+    /// @dev Only the company can accept work.
     function acceptWork(uint256 _id)
         external
         validAgreement(_id)
@@ -342,6 +353,8 @@ contract FLECHub is ReentrancyGuard {
     }
 
     // ===== Cancel / dispute =====
+    /// @notice Cancel an agreement under allowed conditions.
+    /// @dev Only the company can cancel.
     function cancelAgreement(uint256 _id) external validAgreement(_id) onlyCompany(_id) nonReentrant {
         Agreement storage ag = agreements[_id];
 
@@ -380,6 +393,8 @@ contract FLECHub is ReentrancyGuard {
         emit AgreementCancelled(_id, refundAmount);
     }
 
+    /// @notice Raise a dispute for the agreement.
+    /// @dev Only the company or freelancer can raise a dispute.
     function raiseDispute(uint256 _id, string calldata _reason) external validAgreement(_id) onlyParty(_id) {
         Agreement storage ag = agreements[_id];
 
@@ -405,6 +420,8 @@ contract FLECHub is ReentrancyGuard {
      * - payToFreelancer + refundToCompany must equal remaining
      * After resolution, agreement is finalized (Completed or Cancelled).
      */
+    /// @notice Resolve a dispute and split remaining escrow.
+    /// @dev Only the assigned arbitrator can resolve.
     function resolveDispute(
         uint256 _id,
         uint256 payToFreelancer,
@@ -443,6 +460,8 @@ contract FLECHub is ReentrancyGuard {
     }
 
     // ===== Payment release =====
+    /// @notice Release payment for accepted work or monthly cycle.
+    /// @dev Only the company or freelancer can release payment.
     function releasePayment(uint256 _id) external validAgreement(_id) onlyParty(_id) nonReentrant {
         Agreement storage ag = agreements[_id];
 
@@ -476,11 +495,13 @@ contract FLECHub is ReentrancyGuard {
                 ag.currentMilestone++;
 
                 uint256 totalMilestones = ag.milestoneDeadlines.length;
+                uint256 perMilestone = ag.totalBudget / totalMilestones;
+                uint256 remainder = ag.totalBudget % totalMilestones;
                 if (ag.currentMilestone == totalMilestones) {
-                    payAmount = ag.totalBudget - ag.amountReleased;
+                    payAmount = perMilestone + remainder;
                     ag.status = Status.Completed;
                 } else {
-                    payAmount = ag.totalBudget / totalMilestones;
+                    payAmount = perMilestone;
                     ag.status = Status.Funded;
                 }
             }
