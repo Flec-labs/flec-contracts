@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * FLECHub
@@ -13,7 +12,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  * - Execution fee: 1.5% (150 bps) per agreement, paid upfront at first deposit, non-refundable
  * - Optional: approval-timeout auto-release and dispute lock
  */
-contract FLECHub is ReentrancyGuard, Ownable {
+contract FLECHub is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     error UnsupportedDecimals();
@@ -64,15 +63,15 @@ contract FLECHub is ReentrancyGuard, Ownable {
     mapping(address => uint256[]) private userAgreements;
 
     // ===== Pricing config =====
-    uint16 public feeBps = 150;          // 1.5% in basis points
-    uint256 public minFeeUsd = 2;        // $2 (converted using token decimals)
-    uint256 public maxFeeUsd = 500;      // $500 (converted using token decimals)
-    address public treasury;
+    uint16 public constant feeBps = 150;          // 1.5% in basis points
+    uint256 public constant minFeeUsd = 2;        // $2 (converted using token decimals)
+    uint256 public constant maxFeeUsd = 500;      // $500 (converted using token decimals)
+    address public immutable treasury;
 
     // ===== Rule config =====
-    uint256 public approvalTimeout = 7 days; // auto-release if company doesn't respond after submission
-    uint8 public maxRejectsPerMilestone = 3;
-    uint256 public resubmissionGrace = 2 days; // grace period to resubmit after rejection
+    uint256 public constant approvalTimeout = 7 days; // auto-release if company doesn't respond after submission
+    uint8 public constant maxRejectsPerMilestone = 3;
+    uint256 public constant resubmissionGrace = 2 days; // grace period to resubmit after rejection
 
     // ===== Events =====
     event AgreementCreated(uint256 indexed id, PType indexed pType, string projectName);
@@ -91,14 +90,9 @@ contract FLECHub is ReentrancyGuard, Ownable {
     event AgreementDisputed(uint256 indexed id, address indexed raisedBy, string reason);
     event DisputeResolved(uint256 indexed id, uint256 paidToFreelancer, uint256 refundedToCompany);
 
-    event FeeConfigUpdated(uint16 feeBps, uint256 minFeeUsd, uint256 maxFeeUsd);
-    event TreasuryUpdated(address treasury);
-    event ApprovalTimeoutUpdated(uint256 approvalTimeout);
     event ArbitratorSet(uint256 indexed id, address indexed arbitrator);
-    event MaxRejectsUpdated(uint8 maxRejects);
-    event ResubmissionGraceUpdated(uint256 resubmissionGrace);
 
-    constructor(address _initialOwner) Ownable(_initialOwner) {
+    constructor(address _initialOwner) {
         treasury = _initialOwner;
     }
 
@@ -128,40 +122,6 @@ contract FLECHub is ReentrancyGuard, Ownable {
             "Not a party"
         );
         _;
-    }
-
-    // ===== Admin =====
-    function setFeeConfig(uint16 _feeBps, uint256 _minFeeUsd, uint256 _maxFeeUsd) external onlyOwner {
-        require(_feeBps <= 10_000, "feeBps too large");
-        require(_minFeeUsd <= _maxFeeUsd, "minFee > maxFee");
-        feeBps = _feeBps;
-        minFeeUsd = _minFeeUsd;
-        maxFeeUsd = _maxFeeUsd;
-        emit FeeConfigUpdated(_feeBps, _minFeeUsd, _maxFeeUsd);
-    }
-
-    function setTreasury(address _treasury) external onlyOwner {
-        require(_treasury != address(0), "treasury is zero");
-        treasury = _treasury;
-        emit TreasuryUpdated(_treasury);
-    }
-
-    function setApprovalTimeout(uint256 _approvalTimeout) external onlyOwner {
-        require(_approvalTimeout >= 1 hours, "timeout too small");
-        approvalTimeout = _approvalTimeout;
-        emit ApprovalTimeoutUpdated(_approvalTimeout);
-    }
-
-    function setMaxRejectsPerMilestone(uint8 _maxRejects) external onlyOwner {
-        require(_maxRejects > 0 && _maxRejects <= 10, "Invalid max rejects");
-        maxRejectsPerMilestone = _maxRejects;
-        emit MaxRejectsUpdated(_maxRejects);
-    }
-
-    function setResubmissionGrace(uint256 _grace) external onlyOwner {
-        require(_grace > 0 && _grace <= 30 days, "Invalid grace period");
-        resubmissionGrace = _grace;
-        emit ResubmissionGraceUpdated(_grace);
     }
 
     // ===== Fee math =====
