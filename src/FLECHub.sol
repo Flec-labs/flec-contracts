@@ -163,6 +163,8 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
         require(_token != address(0), "Token is zero address");
         require(_totalBudget > 0, "Total budget must be > 0");
         require(_arbitrator != address(0), "Arbitrator is zero");
+        require(bytes(_projectName).length > 0, "Empty project name");
+        require(bytes(_description).length > 0, "Empty description");
 
         if (_pType == PType.Monthly) {
             require(_monthlyRate > 0, "Monthly rate must be > 0");
@@ -226,7 +228,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     // ===== Escrow funding (fee collected here) =====
     /// @notice Deposit escrow and pay execution fee.
     /// @dev Only the agreement company can deposit.
-    function deposit(uint256 _id) external validAgreement(_id) onlyCompany(_id) nonReentrant {
+    function deposit(uint256 _id) external nonReentrant validAgreement(_id) onlyCompany(_id) {
         Agreement storage ag = agreements[_id];
 
         require(ag.status == Status.Created, "Agreement not in Created");
@@ -255,9 +257,9 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     /// @dev Only the assigned freelancer can submit.
     function submitWork(uint256 _id, string memory _proofURI)
         external
+        nonReentrant
         validAgreement(_id)
         onlyFreelancer(_id)
-        nonReentrant
     {
         Agreement storage ag = agreements[_id];
 
@@ -292,9 +294,9 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     /// @dev Only the company can reject work.
     function rejectWork(uint256 _id, string memory _reason)
         external
+        nonReentrant
         validAgreement(_id)
         onlyCompany(_id)
-        nonReentrant
     {
         Agreement storage ag = agreements[_id];
 
@@ -320,9 +322,9 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     /// @dev Only the company can accept work.
     function acceptWork(uint256 _id)
         external
+        nonReentrant
         validAgreement(_id)
         onlyCompany(_id)
-        nonReentrant
     {
         Agreement storage ag = agreements[_id];
 
@@ -337,7 +339,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
      * Anyone can trigger this to prevent "ghosting" after the approval timeout.
      * It auto-accepts the submission and releases the corresponding payment.
      */
-    function autoReleaseIfExpired(uint256 _id) external validAgreement(_id) nonReentrant {
+    function autoReleaseIfExpired(uint256 _id) external nonReentrant validAgreement(_id) {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
@@ -355,7 +357,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     // ===== Cancel / dispute =====
     /// @notice Cancel an agreement under allowed conditions.
     /// @dev Only the company can cancel.
-    function cancelAgreement(uint256 _id) external validAgreement(_id) onlyCompany(_id) nonReentrant {
+    function cancelAgreement(uint256 _id) external nonReentrant validAgreement(_id) onlyCompany(_id) {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Completed && ag.status != Status.Cancelled, "Agreement already finished");
@@ -426,7 +428,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
         uint256 _id,
         uint256 payToFreelancer,
         uint256 refundToCompany
-    ) external validAgreement(_id) onlyArbitrator(_id) nonReentrant {
+    ) external nonReentrant validAgreement(_id) onlyArbitrator(_id) {
         Agreement storage ag = agreements[_id];
 
         require(ag.status == Status.Disputed, "Not disputed");
@@ -462,7 +464,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     // ===== Payment release =====
     /// @notice Release payment for accepted work or monthly cycle.
     /// @dev Only the company or freelancer can release payment.
-    function releasePayment(uint256 _id) external validAgreement(_id) onlyParty(_id) nonReentrant {
+    function releasePayment(uint256 _id) external nonReentrant validAgreement(_id) onlyParty(_id) {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
