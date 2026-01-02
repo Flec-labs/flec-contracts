@@ -60,6 +60,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     mapping(uint256 => Agreement) public agreements;
     uint256 public nextId;
     mapping(address => uint256[]) private userAgreements;
+    mapping(address => string) public encryptionPublicKey;
 
     // ===== Pricing config =====
     uint16 public constant feeBps = 150;          // 1.5% in basis points
@@ -92,6 +93,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
 
     event ArbitratorSet(uint256 indexed id, address indexed arbitrator);
     event HubInitialized(address indexed treasury);
+    event EncryptionPublicKeyUpdated(address indexed user, string key);
 
     constructor(address _initialOwner) {
         require(_initialOwner != address(0), "Owner is zero");
@@ -532,5 +534,15 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
 
     function getAgreementDetails(uint256 _id) external view returns (Agreement memory) {
         return agreements[_id];
+    }
+
+    function setEncryptionPublicKey(string calldata key) external {
+        require(bytes(key).length > 0, "Key required");
+        encryptionPublicKey[msg.sender] = key;
+        emit EncryptionPublicKeyUpdated(msg.sender, key);
+    }
+
+    function getEncryptionPublicKey(address user) external view returns (string memory) {
+        return encryptionPublicKey[user];
     }
 }
