@@ -68,6 +68,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     uint256 public constant minFeeUsd = 1;        // $1 (converted using token decimals)
     uint256 public constant maxFeeUsd = 500;      // $500 (converted using token decimals)
     address public immutable treasury;
+    address public immutable allowedToken;
 
     // ===== Rule config =====
     uint256 public constant approvalTimeout = 7 days; // auto-release if company doesn't respond after submission
@@ -97,9 +98,11 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     event EncryptionPublicKeyUpdated(address indexed user, string key);
     event ProfileCIDUpdated(address indexed user, string cid);
 
-    constructor(address _initialOwner) {
+    constructor(address _initialOwner, address _allowedToken) {
         require(_initialOwner != address(0), "Owner is zero");
+        require(_allowedToken != address(0), "Token is zero");
         treasury = _initialOwner;
+        allowedToken = _allowedToken;
         emit HubInitialized(_initialOwner);
     }
 
@@ -132,6 +135,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
 
     // ===== Fee math =====
     function calculateExecutionFee(address _token, uint256 _totalBudget) public view returns (uint256) {
+        if (_token != allowedToken) revert TokenNotAllowed();
         // % fee in token units
         uint256 raw = (_totalBudget * feeBps) / 10_000;
 
@@ -165,6 +169,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     ) external returns (uint256) {
         require(_freelancer != address(0), "Freelancer is zero address");
         require(_token != address(0), "Token is zero address");
+        if (_token != allowedToken) revert TokenNotAllowed();
         require(_totalBudget > 0, "Total budget must be > 0");
         require(_arbitrator != address(0), "Arbitrator is zero");
         require(bytes(_projectName).length > 0, "Empty project name");
@@ -268,23 +273,25 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
-        require(ag.paymentType != PType.Monthly, "Monthly does not require proof");
         require(ag.status == Status.Funded, "Invalid status for submission");
         require(bytes(_proofURI).length > 0, "Empty proof");
-        require(ag.currentMilestone < ag.milestoneDeadlines.length, "Invalid milestone index");
 
-        uint256 activeDeadline = ag.milestoneDeadlines[ag.currentMilestone];
-        
-        // If first submission for this milestone, record timestamp and enforce original deadline
-        if (ag.firstSubmittedAt == 0) {
-            require(block.timestamp <= activeDeadline, "Milestone deadline exceeded");
-            ag.firstSubmittedAt = block.timestamp;
-        } else {
-            // Resubmission allowed until max(originalDeadline, firstSubmit + grace)
-            // This ensures early submitters keep their deadline advantage while late rejects get grace extension
-            uint256 gracefulDeadline = ag.firstSubmittedAt + resubmissionGrace;
-            uint256 effectiveDeadline = activeDeadline > gracefulDeadline ? activeDeadline : gracefulDeadline;
-            require(block.timestamp <= effectiveDeadline, "Resubmission window expired");
+        if (ag.paymentType != PType.Monthly) {
+            require(ag.currentMilestone < ag.milestoneDeadlines.length, "Invalid milestone index");
+
+            uint256 activeDeadline = ag.milestoneDeadlines[ag.currentMilestone];
+            
+            // If first submission for this milestone, record timestamp and enforce original deadline
+            if (ag.firstSubmittedAt == 0) {
+                require(block.timestamp <= activeDeadline, "Milestone deadline exceeded");
+                ag.firstSubmittedAt = block.timestamp;
+            } else {
+                // Resubmission allowed until max(originalDeadline, firstSubmit + grace)
+                // This ensures early submitters keep their deadline advantage while late rejects get grace extension
+                uint256 gracefulDeadline = ag.firstSubmittedAt + resubmissionGrace;
+                uint256 effectiveDeadline = activeDeadline > gracefulDeadline ? activeDeadline : gracefulDeadline;
+                require(block.timestamp <= effectiveDeadline, "Resubmission window expired");
+            }
         }
 
         ag.currentProofURI = _proofURI;
@@ -347,10 +354,12 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
-        require(ag.paymentType != PType.Monthly, "Monthly not eligible");
         require(ag.status == Status.Proposed, "Not in Proposed");
         require(ag.submittedAt != 0, "No submission timestamp");
         require(block.timestamp >= ag.submittedAt + approvalTimeout, "Approval window not expired");
+        if (ag.paymentType == PType.Monthly) {
+            require(block.timestamp >= ag.lastPaymentTime + 30 days, "Payment cycle not yet reached");
+        }
 
         ag.status = Status.Accepted;
         emit WorkAutoAccepted(_id);
@@ -481,7 +490,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
         uint256 payAmount;
 
         if (ag.paymentType == PType.Monthly) {
-            require(ag.status == Status.Funded, "Invalid status for monthly release");
+            require(ag.status == Status.Accepted, "Monthly work must be accepted");
             require(block.timestamp >= ag.lastPaymentTime + 30 days, "Payment cycle not yet reached");
 
             if (ag.amountReleased + ag.monthlyRate >= ag.totalBudget) {
@@ -490,6 +499,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
             } else {
                 payAmount = ag.monthlyRate;
                 ag.lastPaymentTime = block.timestamp;
+                ag.status = Status.Funded;
             }
         } else {
             require(ag.status == Status.Accepted, "Work must be accepted first");
@@ -522,6 +532,13 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
             ag.amountReleased += payAmount;
             IERC20(ag.token).safeTransfer(ag.freelancer, payAmount);
             emit PaymentReleased(_id, payAmount);
+        }
+
+        if (ag.paymentType == PType.Monthly) {
+            ag.currentProofURI = "";
+            ag.submittedAt = 0;
+            ag.firstSubmittedAt = 0;
+            ag.rejectsThisMilestone = 0;
         }
 
         if (ag.status == Status.Completed) {

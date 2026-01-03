@@ -13,9 +13,10 @@ contract DeployFLECHub is Script {
 
         // Alamat yang akan menjadi Owner awal kontrak (biasanya alamatmu sendiri)
         address initialOwner = vm.addr(deployerPrivateKey);
+        address allowedToken = vm.envAddress("ALLOWED_TOKEN");
 
         // Deploy FLECHub
-        FLECHub hub = new FLECHub(initialOwner);
+        FLECHub hub = new FLECHub(initialOwner, allowedToken);
 
         console.log("FLECHub deployed at:", address(hub));
 

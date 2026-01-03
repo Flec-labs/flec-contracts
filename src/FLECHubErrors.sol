@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 interface FLECHubErrors {
     error UnsupportedDecimals();
+    error TokenNotAllowed();
     error InvalidAgreement();
     error OnlyCompany();
     error OnlyFreelancer();
