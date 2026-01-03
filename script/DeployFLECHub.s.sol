@@ -8,7 +8,7 @@ contract DeployFLECHub is Script {
     function run() external {
         // Ambil private key dari .env
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        
+
         vm.startBroadcast(deployerPrivateKey);
 
         // Alamat yang akan menjadi Owner awal kontrak (biasanya alamatmu sendiri)

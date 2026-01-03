@@ -16,44 +16,49 @@ import "./FLECHubErrors.sol";
 contract FLECHub is ReentrancyGuard, FLECHubErrors {
     using SafeERC20 for IERC20;
 
-    enum PType { OneTime, Milestone, Monthly }
+    enum PType {
+        OneTime,
+        Milestone,
+        Monthly
+    }
     // NOTE: Disputed appended at the end to avoid shifting existing enum values (for new deployments only).
-    enum Status { Created, Funded, Proposed, Accepted, Completed, Cancelled, Disputed }
+    enum Status {
+        Created,
+        Funded,
+        Proposed,
+        Accepted,
+        Completed,
+        Cancelled,
+        Disputed
+    }
 
     struct Agreement {
         address company;
         address freelancer;
         address arbitrator;
         address token;
-
-        uint256 totalBudget;      // escrow budget (excludes execution fee)
+        uint256 totalBudget; // escrow budget (excludes execution fee)
         uint256 amountReleased;
-
         // Monthly payroll
         uint256 lastPaymentTime;
         uint256 monthlyRate;
-
         // OneTime / Milestone scheduling
         uint256[] milestoneDeadlines;
         uint8 currentMilestone;
         uint8 rejectsThisMilestone;
-        uint256 firstSubmittedAt;  // timestamp of first submission for current milestone (for grace period)
-
+        uint256 firstSubmittedAt; // timestamp of first submission for current milestone (for grace period)
         // Workflow status
         Status status;
         PType paymentType;
-
         // Metadata
         string projectName;
         string description;
-
         // Proof
         string currentProofURI;
-        uint256 submittedAt;      // last submission time (for approval timeout)
-
+        uint256 submittedAt; // last submission time (for approval timeout)
         // Execution fee
         bool feePaid;
-        uint256 executionFee;     // cached fee amount in token units
+        uint256 executionFee; // cached fee amount in token units
     }
 
     // ===== Storage =====
@@ -64,9 +69,9 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     mapping(address => string) public profileCID;
 
     // ===== Pricing config =====
-    uint16 public constant feeBps = 150;          // 1.5% in basis points
-    uint256 public constant minFeeUsd = 1;        // $1 (converted using token decimals)
-    uint256 public constant maxFeeUsd = 500;      // $500 (converted using token decimals)
+    uint16 public constant feeBps = 150; // 1.5% in basis points
+    uint256 public constant minFeeUsd = 1; // $1 (converted using token decimals)
+    uint256 public constant maxFeeUsd = 500; // $500 (converted using token decimals)
     address public immutable treasury;
     address public immutable allowedToken;
 
@@ -201,27 +206,20 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
             freelancer: _freelancer,
             arbitrator: _arbitrator,
             token: _token,
-
             totalBudget: _totalBudget,
             amountReleased: 0,
-
             lastPaymentTime: 0,
             monthlyRate: _pType == PType.Monthly ? _monthlyRate : 0,
-
             milestoneDeadlines: _pType == PType.Monthly ? new uint256[](0) : _milestoneDeadlines,
             currentMilestone: 0,
             rejectsThisMilestone: 0,
             firstSubmittedAt: 0,
-
             status: Status.Created,
             paymentType: _pType,
-
             projectName: _projectName,
             description: _description,
-
             currentProofURI: "",
             submittedAt: 0,
-
             feePaid: false,
             executionFee: 0
         });
@@ -280,7 +278,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
             require(ag.currentMilestone < ag.milestoneDeadlines.length, "Invalid milestone index");
 
             uint256 activeDeadline = ag.milestoneDeadlines[ag.currentMilestone];
-            
+
             // If first submission for this milestone, record timestamp and enforce original deadline
             if (ag.firstSubmittedAt == 0) {
                 require(block.timestamp <= activeDeadline, "Milestone deadline exceeded");
@@ -331,12 +329,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
 
     /// @notice Accept submitted work.
     /// @dev Only the company can accept work.
-    function acceptWork(uint256 _id)
-        external
-        nonReentrant
-        validAgreement(_id)
-        onlyCompany(_id)
-    {
+    function acceptWork(uint256 _id) external nonReentrant validAgreement(_id) onlyCompany(_id) {
         Agreement storage ag = agreements[_id];
 
         require(ag.status != Status.Disputed, "Agreement is disputed");
@@ -392,7 +385,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
         } else {
             // For non-monthly, prevent cancel after work submission (must dispute instead)
             require(ag.firstSubmittedAt == 0, "Cannot cancel after submission, use dispute");
-            
+
             // Enforce deadline-based cancellation
             require(ag.currentMilestone < ag.milestoneDeadlines.length, "Invalid milestone index");
             uint256 activeDeadline = ag.milestoneDeadlines[ag.currentMilestone];
@@ -419,10 +412,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
 
         // Prevent dispute abuse to block auto-release
         if (ag.status == Status.Proposed) {
-            require(
-                ag.submittedAt != 0 && block.timestamp < ag.submittedAt + approvalTimeout,
-                "Too late to dispute"
-            );
+            require(ag.submittedAt != 0 && block.timestamp < ag.submittedAt + approvalTimeout, "Too late to dispute");
         }
 
         ag.status = Status.Disputed;
@@ -437,11 +427,12 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
      */
     /// @notice Resolve a dispute and split remaining escrow.
     /// @dev Only the assigned arbitrator can resolve.
-    function resolveDispute(
-        uint256 _id,
-        uint256 payToFreelancer,
-        uint256 refundToCompany
-    ) external nonReentrant validAgreement(_id) onlyArbitrator(_id) {
+    function resolveDispute(uint256 _id, uint256 payToFreelancer, uint256 refundToCompany)
+        external
+        nonReentrant
+        validAgreement(_id)
+        onlyArbitrator(_id)
+    {
         Agreement storage ag = agreements[_id];
 
         require(ag.status == Status.Disputed, "Not disputed");

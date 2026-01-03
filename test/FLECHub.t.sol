@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract MockUSDC is ERC20 {
     constructor() ERC20("Mock USDC", "mUSDC") {
-        _mint(msg.sender, 1000000 * 10**6);
+        _mint(msg.sender, 1000000 * 10 ** 6);
     }
 
     function decimals() public view virtual override returns (uint8) {
@@ -18,7 +18,7 @@ contract MockUSDC is ERC20 {
 
 contract MockBadDecimals is ERC20 {
     constructor() ERC20("Mock Bad", "mBAD") {
-        _mint(msg.sender, 1000000 * 10**19);
+        _mint(msg.sender, 1000000 * 10 ** 19);
     }
 
     function decimals() public view virtual override returns (uint8) {
@@ -35,7 +35,7 @@ contract FLECHubTest is Test {
     address public freelancer = address(3);
     address public arbitrator = address(4);
 
-    uint256 constant USDC = 10**6; 
+    uint256 constant USDC = 10 ** 6;
 
     function setUp() public {
         vm.startPrank(owner);
@@ -53,13 +53,13 @@ contract FLECHubTest is Test {
         uint256 budget = 100 * USDC;
 
         uint256 id = hub.createAgreement(
-            freelancer, 
-            address(token), 
-            budget, 
-            0, 
-            d, 
-            FLECHub.PType.OneTime, 
-            "Logo Design", 
+            freelancer,
+            address(token),
+            budget,
+            0,
+            d,
+            FLECHub.PType.OneTime,
+            "Logo Design",
             "Design a minimalist logo with 3 revisions",
             arbitrator
         );
@@ -79,26 +79,26 @@ contract FLECHubTest is Test {
         hub.releasePayment(id);
 
         assertEq(token.balanceOf(freelancer), 100 * USDC);
-        assertEq(uint(hub.getAgreementDetails(id).status), 4);
+        assertEq(uint256(hub.getAgreementDetails(id).status), 4);
         assertEq(hub.getAgreementDetails(id).description, "Design a minimalist logo with 3 revisions");
     }
 
     // --- 2. TEST MILESTONE FLOW ---
     function testMilestoneFullFlow() public {
         vm.startPrank(company);
-        uint256 totalBudget = 100 * USDC; 
+        uint256 totalBudget = 100 * USDC;
         uint256[] memory d = new uint256[](3);
         d[0] = block.timestamp + 1 weeks;
         d[1] = block.timestamp + 2 weeks;
         d[2] = block.timestamp + 3 weeks;
 
         uint256 id = hub.createAgreement(
-            freelancer, 
-            address(token), 
-            totalBudget, 
-            0, 
-            d, 
-            FLECHub.PType.Milestone, 
+            freelancer,
+            address(token),
+            totalBudget,
+            0,
+            d,
+            FLECHub.PType.Milestone,
             "Web Dev",
             "Develop a landing page, dashboard, and API integration",
             arbitrator
@@ -109,19 +109,19 @@ contract FLECHubTest is Test {
         hub.deposit(id);
         vm.stopPrank();
 
-        for(uint i = 0; i < 3; i++) {
+        for (uint256 i = 0; i < 3; i++) {
             vm.prank(freelancer);
             hub.submitWork(id, "proof");
 
             vm.prank(company);
-            hub.acceptWork(id); 
+            hub.acceptWork(id);
 
             vm.prank(company);
             hub.releasePayment(id);
         }
 
         assertEq(token.balanceOf(freelancer), 100 * USDC);
-        assertEq(uint(hub.getAgreementDetails(id).status), 4);
+        assertEq(uint256(hub.getAgreementDetails(id).status), 4);
     }
 
     // --- 3. TEST REJECT ---
@@ -130,13 +130,13 @@ contract FLECHubTest is Test {
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
         uint256 id = hub.createAgreement(
-            freelancer, 
-            address(token), 
-            10 * USDC, 
-            0, 
-            d, 
-            FLECHub.PType.OneTime, 
-            "Art", 
+            freelancer,
+            address(token),
+            10 * USDC,
+            0,
+            d,
+            FLECHub.PType.OneTime,
+            "Art",
             "Digital illustration task",
             arbitrator
         );
@@ -151,7 +151,7 @@ contract FLECHubTest is Test {
         vm.prank(company);
         hub.rejectWork(id, "Revision needed: poor quality");
 
-        assertEq(uint(hub.getAgreementDetails(id).status), 1);
+        assertEq(uint256(hub.getAgreementDetails(id).status), 1);
     }
 
     // --- 4. TEST CANCEL (DEADLINE) ---
@@ -160,13 +160,13 @@ contract FLECHubTest is Test {
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 days;
         uint256 id = hub.createAgreement(
-            freelancer, 
-            address(token), 
-            100 * USDC, 
-            0, 
-            d, 
-            FLECHub.PType.OneTime, 
-            "App", 
+            freelancer,
+            address(token),
+            100 * USDC,
+            0,
+            d,
+            FLECHub.PType.OneTime,
+            "App",
             "Mobile app development",
             arbitrator
         );
@@ -181,24 +181,24 @@ contract FLECHubTest is Test {
         uint256 balAfter = token.balanceOf(company);
 
         assertEq(balAfter - balBefore, 100 * USDC);
-        assertEq(uint(hub.getAgreementDetails(id).status), 5);
+        assertEq(uint256(hub.getAgreementDetails(id).status), 5);
         vm.stopPrank();
     }
 
     // --- 5. TEST REVERT MESSAGES ---
-    
+
     function test_RevertWhen_SubmitWorkAfterDeadline() public {
         vm.startPrank(company);
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 hours;
         uint256 id = hub.createAgreement(
-            freelancer, 
-            address(token), 
-            10 * USDC, 
-            0, 
-            d, 
-            FLECHub.PType.OneTime, 
-            "Quick Task", 
+            freelancer,
+            address(token),
+            10 * USDC,
+            0,
+            d,
+            FLECHub.PType.OneTime,
+            "Quick Task",
             "Needs to be done fast",
             arbitrator
         );
@@ -219,15 +219,7 @@ contract FLECHubTest is Test {
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
         uint256 id = hub.createAgreement(
-            freelancer, 
-            address(token), 
-            10 * USDC, 
-            0, 
-            d, 
-            FLECHub.PType.OneTime, 
-            "Art", 
-            "Illustration",
-            arbitrator
+            freelancer, address(token), 10 * USDC, 0, d, FLECHub.PType.OneTime, "Art", "Illustration", arbitrator
         );
         uint256 fee = hub.calculateExecutionFee(address(token), 10 * USDC);
         token.approve(address(hub), 10 * USDC + fee);
@@ -247,15 +239,7 @@ contract FLECHubTest is Test {
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
         uint256 id = hub.createAgreement(
-            freelancer, 
-            address(token), 
-            10 * USDC, 
-            0, 
-            d, 
-            FLECHub.PType.OneTime, 
-            "Art", 
-            "Illustration",
-            arbitrator
+            freelancer, address(token), 10 * USDC, 0, d, FLECHub.PType.OneTime, "Art", "Illustration", arbitrator
         );
         vm.stopPrank();
 
@@ -311,7 +295,7 @@ contract FLECHubTest is Test {
         vm.stopPrank();
 
         assertEq(token.balanceOf(freelancer), totalBudget);
-        assertEq(uint(hub.getAgreementDetails(id).status), 4);
+        assertEq(uint256(hub.getAgreementDetails(id).status), 4);
     }
 
     // --- 7. TEST DISPUTE FLOW ---
@@ -320,15 +304,7 @@ contract FLECHubTest is Test {
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
         uint256 id = hub.createAgreement(
-            freelancer,
-            address(token),
-            20 * USDC,
-            0,
-            d,
-            FLECHub.PType.OneTime,
-            "Fix Bug",
-            "Critical patch",
-            arbitrator
+            freelancer, address(token), 20 * USDC, 0, d, FLECHub.PType.OneTime, "Fix Bug", "Critical patch", arbitrator
         );
         uint256 fee = hub.calculateExecutionFee(address(token), 20 * USDC);
         token.approve(address(hub), 20 * USDC + fee);
@@ -344,7 +320,7 @@ contract FLECHubTest is Test {
         uint256 balAfter = token.balanceOf(company);
 
         assertEq(balAfter - balBefore, 20 * USDC);
-        assertEq(uint(hub.getAgreementDetails(id).status), 5);
+        assertEq(uint256(hub.getAgreementDetails(id).status), 5);
     }
 
     function testDisputeSplitToFreelancerAndCompany() public {
@@ -352,15 +328,7 @@ contract FLECHubTest is Test {
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
         uint256 id = hub.createAgreement(
-            freelancer,
-            address(token),
-            40 * USDC,
-            0,
-            d,
-            FLECHub.PType.OneTime,
-            "Design",
-            "Partial delivery",
-            arbitrator
+            freelancer, address(token), 40 * USDC, 0, d, FLECHub.PType.OneTime, "Design", "Partial delivery", arbitrator
         );
         uint256 fee = hub.calculateExecutionFee(address(token), 40 * USDC);
         token.approve(address(hub), 40 * USDC + fee);
@@ -379,7 +347,7 @@ contract FLECHubTest is Test {
 
         assertEq(freelancerAfter - freelancerBefore, 15 * USDC);
         assertEq(companyAfter - companyBefore, 25 * USDC);
-        assertEq(uint(hub.getAgreementDetails(id).status), 4);
+        assertEq(uint256(hub.getAgreementDetails(id).status), 4);
     }
 
     // --- 8. TEST AUTO RELEASE ---
@@ -388,15 +356,7 @@ contract FLECHubTest is Test {
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
         uint256 id = hub.createAgreement(
-            freelancer,
-            address(token),
-            10 * USDC,
-            0,
-            d,
-            FLECHub.PType.OneTime,
-            "Logo",
-            "Auto release",
-            arbitrator
+            freelancer, address(token), 10 * USDC, 0, d, FLECHub.PType.OneTime, "Logo", "Auto release", arbitrator
         );
         uint256 fee = hub.calculateExecutionFee(address(token), 10 * USDC);
         token.approve(address(hub), 10 * USDC + fee);
@@ -411,7 +371,7 @@ contract FLECHubTest is Test {
         hub.autoReleaseIfExpired(id);
 
         assertEq(token.balanceOf(freelancer), 10 * USDC);
-        assertEq(uint(hub.getAgreementDetails(id).status), 4);
+        assertEq(uint256(hub.getAgreementDetails(id).status), 4);
     }
 
     // --- 9. TEST REJECT LIMIT ESCALATION ---
@@ -420,15 +380,7 @@ contract FLECHubTest is Test {
         uint256[] memory d = new uint256[](1);
         d[0] = block.timestamp + 1 weeks;
         uint256 id = hub.createAgreement(
-            freelancer,
-            address(token),
-            10 * USDC,
-            0,
-            d,
-            FLECHub.PType.OneTime,
-            "Art",
-            "Reject escalation",
-            arbitrator
+            freelancer, address(token), 10 * USDC, 0, d, FLECHub.PType.OneTime, "Art", "Reject escalation", arbitrator
         );
         uint256 fee = hub.calculateExecutionFee(address(token), 10 * USDC);
         token.approve(address(hub), 10 * USDC + fee);
@@ -442,7 +394,7 @@ contract FLECHubTest is Test {
             hub.rejectWork(id, "reject");
         }
 
-        assertEq(uint(hub.getAgreementDetails(id).status), 6);
+        assertEq(uint256(hub.getAgreementDetails(id).status), 6);
     }
 
     // --- 10. TEST MONTHLY CANCEL MID-CYCLE ---

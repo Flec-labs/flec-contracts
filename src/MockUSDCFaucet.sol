@@ -7,9 +7,9 @@ import {MockUSDC} from "./MockUSDC.sol";
 contract MockUSDCFaucet is Ownable {
     MockUSDC public immutable token;
 
-    uint256 public dripAmount;     // contoh: 1_000e6 = 1,000 USDC
-    uint48  public cooldown;       // contoh: 24 hours
-    uint256 public maxBalance;     // contoh: 10_000e6 (anti-hoarding)
+    uint256 public dripAmount; // contoh: 1_000e6 = 1,000 USDC
+    uint48 public cooldown; // contoh: 24 hours
+    uint256 public maxBalance; // contoh: 10_000e6 (anti-hoarding)
 
     bool public allowlistEnabled;
     mapping(address => bool) public allowlist;
@@ -18,13 +18,9 @@ contract MockUSDCFaucet is Ownable {
     event Dripped(address indexed user, uint256 amount);
     event FaucetConfig(uint256 dripAmount, uint48 cooldown, uint256 maxBalance, bool allowlistEnabled);
 
-    constructor(
-        address initialOwner,
-        MockUSDC _token,
-        uint256 _dripAmount,
-        uint48 _cooldown,
-        uint256 _maxBalance
-    ) Ownable(initialOwner) {
+    constructor(address initialOwner, MockUSDC _token, uint256 _dripAmount, uint48 _cooldown, uint256 _maxBalance)
+        Ownable(initialOwner)
+    {
         require(address(_token) != address(0), "token=0");
         token = _token;
         dripAmount = _dripAmount;
