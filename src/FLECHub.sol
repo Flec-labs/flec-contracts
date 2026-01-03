@@ -61,10 +61,11 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     uint256 public nextId;
     mapping(address => uint256[]) private userAgreements;
     mapping(address => string) public encryptionPublicKey;
+    mapping(address => string) public profileCID;
 
     // ===== Pricing config =====
     uint16 public constant feeBps = 150;          // 1.5% in basis points
-    uint256 public constant minFeeUsd = 2;        // $2 (converted using token decimals)
+    uint256 public constant minFeeUsd = 1;        // $1 (converted using token decimals)
     uint256 public constant maxFeeUsd = 500;      // $500 (converted using token decimals)
     address public immutable treasury;
 
@@ -94,6 +95,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     event ArbitratorSet(uint256 indexed id, address indexed arbitrator);
     event HubInitialized(address indexed treasury);
     event EncryptionPublicKeyUpdated(address indexed user, string key);
+    event ProfileCIDUpdated(address indexed user, string cid);
 
     constructor(address _initialOwner) {
         require(_initialOwner != address(0), "Owner is zero");
@@ -544,5 +546,15 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
 
     function getEncryptionPublicKey(address user) external view returns (string memory) {
         return encryptionPublicKey[user];
+    }
+
+    function setProfileCID(string calldata cid) external {
+        require(bytes(cid).length > 0, "CID required");
+        profileCID[msg.sender] = cid;
+        emit ProfileCIDUpdated(msg.sender, cid);
+    }
+
+    function getProfileCID(address user) external view returns (string memory) {
+        return profileCID[user];
     }
 }
