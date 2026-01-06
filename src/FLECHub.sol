@@ -179,11 +179,22 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
         string memory _description,
         address _arbitrator
     ) external returns (uint256) {
+        // Validasi address kosong
         require(_freelancer != address(0), "Freelancer is zero address");
-        require(_token != address(0), "Token is zero address");
-        if (_token != allowedToken) revert TokenNotAllowed();
-        require(_totalBudget > 0, "Total budget must be > 0");
         require(_arbitrator != address(0), "Arbitrator is zero");
+        require(_token != address(0), "Token is zero address");
+
+        // Validasi token
+        if (_token != allowedToken) revert TokenNotAllowed();
+
+        // Validasi totalBudget
+        require(_totalBudget > 0, "Total budget must be > 0");
+
+        // Validasi address
+        require(msg.sender != _freelancer, "Cannot contract with yourself");
+        require(_arbitrator != msg.sender && _arbitrator != _freelancer, "Arbitrator must be neutral");
+
+        // Validasi input field
         require(bytes(_projectName).length > 0, "Empty project name");
         require(bytes(_description).length > 0, "Empty description");
 
