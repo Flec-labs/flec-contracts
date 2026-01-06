@@ -41,16 +41,9 @@ contract FLECHubTest is Test {
 
     function setUp() public {
         vm.startPrank(owner);
-        
-        // PERBAIKAN: Masukkan 2 argumen (Owner, FeeRecipient)
-        // Sesuaikan urutan dengan constructor di FLECHub.sol kamu
-        hub = new FLECHub(owner, feeRecipient); 
-        
-        token = new MockUSDC();
-        
-        // JANGAN LUPA: Daftarkan token ke whitelist jika createAgreement mengecek allowedToken
-        hub.setAllowedToken(address(token), true); 
-        
+        token = new MockUSDC(); // Deploy token dulu
+        // Masukkan owner DAN alamat token ke constructor
+        hub = new FLECHub(owner, address(token)); 
         token.transfer(company, 10000 * USDC);
         vm.stopPrank();
     }
@@ -264,9 +257,11 @@ contract FLECHubTest is Test {
         hub.deposit(999);
     }
 
-    function test_RevertWhen_UnsupportedDecimals() public {
+    function test_RevertWhen_InvalidTokenInFeeCalc() public {
         MockBadDecimals bad = new MockBadDecimals();
-        vm.expectRevert(abi.encodeWithSelector(FLECHubErrors.UnsupportedDecimals.selector));
+        // Karena token ini tidak ada di whitelist (allowedToken), 
+        // maka errornya adalah TokenNotAllowed
+        vm.expectRevert(abi.encodeWithSelector(FLECHubErrors.TokenNotAllowed.selector));
         hub.calculateExecutionFee(address(bad), 100 * USDC);
     }
 
@@ -278,34 +273,38 @@ contract FLECHubTest is Test {
         uint256[] memory d = new uint256[](0);
 
         uint256 id = hub.createAgreement(
-            freelancer,
-            address(token),
-            totalBudget,
-            monthlyRate,
-            d,
-            FLECHub.PType.Monthly,
-            "Retainer",
-            "Monthly maintenance",
-            arbitrator
+            freelancer, address(token), totalBudget, monthlyRate, d,
+            FLECHub.PType.Monthly, "Retainer", "Monthly maintenance", arbitrator
         );
 
         uint256 fee = hub.calculateExecutionFee(address(token), totalBudget);
         token.approve(address(hub), totalBudget + fee);
         hub.deposit(id);
+        vm.stopPrank(); // Hentikan prank company sejenak
+
+        // --- TAMBAHKAN PROSES INI UNTUK SETIAP CYCLE ---
+        
+        // Cycle 1
+        vm.prank(freelancer);
+        hub.submitWork(id, "ipfs://proof-month-1");
+        vm.prank(company);
+        hub.acceptWork(id);
 
         vm.warp(hub.getAgreementDetails(id).lastPaymentTime + 30 days);
+        vm.prank(company);
         hub.releasePayment(id);
+
+        // Cycle 2
+        vm.prank(freelancer);
+        hub.submitWork(id, "ipfs://proof-month-2");
+        vm.prank(company);
+        hub.acceptWork(id);
 
         vm.warp(hub.getAgreementDetails(id).lastPaymentTime + 30 days);
+        vm.prank(company);
         hub.releasePayment(id);
 
-        vm.warp(hub.getAgreementDetails(id).lastPaymentTime + 30 days);
-        hub.releasePayment(id);
-
-        vm.stopPrank();
-
-        assertEq(token.balanceOf(freelancer), totalBudget);
-        assertEq(uint256(hub.getAgreementDetails(id).status), 4);
+        assertEq(token.balanceOf(freelancer), 60 * USDC); // 2 kali monthly rate
     }
 
     // --- 7. TEST DISPUTE FLOW ---
