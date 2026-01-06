@@ -81,6 +81,9 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     uint256 public constant resubmissionGrace = 2 days; // grace period to resubmit after rejection
     uint256 public constant maxMilestones = 50;
 
+    // ==== Token decimals =====
+    uint8 public immutable tokenDecimals;
+
     // ===== Events =====
     event AgreementCreated(uint256 indexed id, PType indexed pType, string projectName);
     event FundsLocked(uint256 indexed id, uint256 escrowBudget);
@@ -103,13 +106,19 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     event EncryptionPublicKeyUpdated(address indexed user, string key);
     event ProfileCIDUpdated(address indexed user, string cid);
 
+
+
     constructor(address _initialOwner, address _allowedToken) {
         require(_initialOwner != address(0), "Owner is zero");
         require(_allowedToken != address(0), "Token is zero");
         treasury = _initialOwner;
         allowedToken = _allowedToken;
+        
+        // Ambil desimal sekali saja di sini
+        tokenDecimals = IERC20Metadata(_allowedToken).decimals();
+        
         emit HubInitialized(_initialOwner);
-    }
+}
 
     modifier onlyArbitrator(uint256 _id) {
         if (msg.sender != agreements[_id].arbitrator) revert OnlyArbitrator();
@@ -141,13 +150,11 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     // ===== Fee math =====
     function calculateExecutionFee(address _token, uint256 _totalBudget) public view returns (uint256) {
         if (_token != allowedToken) revert TokenNotAllowed();
-        // % fee in token units
+            
         uint256 raw = (_totalBudget * feeBps) / 10_000;
-
-        // Convert USD min/max guardrails into token units using token decimals
-        uint8 dec = IERC20Metadata(_token).decimals();
-        if (dec > 18) revert UnsupportedDecimals();
-        uint256 scale = 10 ** uint256(dec);
+        
+        // Gunakan variabel internal, bukan external call
+        uint256 scale = 10 ** uint256(tokenDecimals);
 
         uint256 minFee = minFeeUsd * scale;
         uint256 maxFee = maxFeeUsd * scale;
@@ -238,24 +245,28 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     function deposit(uint256 _id) external nonReentrant validAgreement(_id) onlyCompany(_id) {
         Agreement storage ag = agreements[_id];
 
+        // 1. CHECKS
         require(ag.status == Status.Created, "Agreement not in Created");
         require(!ag.feePaid, "Already funded");
 
         uint256 fee = calculateExecutionFee(ag.token, ag.totalBudget);
+
+        // 2. EFFECTS (Update semua status internal SEBELUM transfer dana)
         ag.executionFee = fee;
         ag.feePaid = true;
+        ag.status = Status.Funded; // PINDAH KE ATAS: Menandai kontrak sudah didanai
+        ag.lastPaymentTime = block.timestamp; // PINDAH KE ATAS: Mengunci waktu mulai
 
+        // 3. INTERACTIONS (Transfer dana dilakukan TERAKHIR)
         // Company pays: escrowBudget + executionFee
         IERC20(ag.token).safeTransferFrom(msg.sender, address(this), ag.totalBudget + fee);
 
-        // Fee is non-refundable and is immediately forwarded to treasury
+        // Fee forwarded to treasury
         if (fee > 0) {
             IERC20(ag.token).safeTransfer(treasury, fee);
             emit ExecutionFeePaid(_id, ag.token, fee, treasury);
         }
 
-        ag.status = Status.Funded;
-        ag.lastPaymentTime = block.timestamp;
         emit FundsLocked(_id, ag.totalBudget);
     }
 
@@ -346,6 +357,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     function autoReleaseIfExpired(uint256 _id) external nonReentrant validAgreement(_id) {
         Agreement storage ag = agreements[_id];
 
+        require(msg.sender == ag.freelancer, "Only the freelancer can trigger auto-release");
         require(ag.status != Status.Disputed, "Agreement is disputed");
         require(ag.status == Status.Proposed, "Not in Proposed");
         require(ag.submittedAt != 0, "No submission timestamp");
@@ -440,26 +452,29 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
         uint256 remaining = ag.totalBudget - ag.amountReleased;
         require(payToFreelancer + refundToCompany == remaining, "Bad split");
 
-        if (payToFreelancer > 0) {
-            ag.amountReleased += payToFreelancer;
-            IERC20(ag.token).safeTransfer(ag.freelancer, payToFreelancer);
-            emit PaymentReleased(_id, payToFreelancer);
-        }
-        if (refundToCompany > 0) {
-            IERC20(ag.token).safeTransfer(ag.company, refundToCompany);
-        }
-
-        // Finalize
-        ag.currentProofURI = "";
-        ag.submittedAt = 0;
-        ag.firstSubmittedAt = 0;
-        ag.rejectsThisMilestone = 0;
-
+        // 1. UPDATE STATUS (Sesuai cara kamu, ini sudah benar)
         if (refundToCompany == remaining) {
             ag.status = Status.Cancelled;
         } else {
             ag.status = Status.Completed;
             emit AgreementCompleted(_id);
+        }
+
+        // 2. FINALIZE / CLEANUP (Pindahin ke sini agar 'Effects' selesai semua)
+        ag.currentProofURI = "";
+        ag.submittedAt = 0;
+        ag.firstSubmittedAt = 0;
+        ag.rejectsThisMilestone = 0;
+
+        // 3. UPDATE BALANCE & TRANSFER (Interactions)
+        if (payToFreelancer > 0) {
+            ag.amountReleased += payToFreelancer; // Efek ke saldo harus sebelum transfer
+            IERC20(ag.token).safeTransfer(ag.freelancer, payToFreelancer);
+            emit PaymentReleased(_id, payToFreelancer);
+        }
+        
+        if (refundToCompany > 0) {
+            IERC20(ag.token).safeTransfer(ag.company, refundToCompany);
         }
 
         emit DisputeResolved(_id, payToFreelancer, refundToCompany);
@@ -480,6 +495,7 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
     function _releasePaymentInternal(uint256 _id, Agreement storage ag) internal {
         uint256 payAmount;
 
+        // --- 1. CHECKS & LOGIC (Perhitungan Tetap Sama) ---
         if (ag.paymentType == PType.Monthly) {
             require(ag.status == Status.Accepted, "Monthly work must be accepted");
             require(block.timestamp >= ag.lastPaymentTime + 30 days, "Payment cycle not yet reached");
@@ -500,10 +516,12 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
                 ag.status = Status.Completed;
             } else if (ag.paymentType == PType.Milestone) {
                 ag.currentMilestone++;
-
                 uint256 totalMilestones = ag.milestoneDeadlines.length;
+                require(totalMilestones > 0, "No milestones defined");
+                
                 uint256 perMilestone = ag.totalBudget / totalMilestones;
                 uint256 remainder = ag.totalBudget % totalMilestones;
+                
                 if (ag.currentMilestone == totalMilestones) {
                     payAmount = perMilestone + remainder;
                     ag.status = Status.Completed;
@@ -512,26 +530,25 @@ contract FLECHub is ReentrancyGuard, FLECHubErrors {
                     ag.status = Status.Funded;
                 }
             }
-
-            ag.currentProofURI = "";
-            ag.submittedAt = 0;
-            ag.firstSubmittedAt = 0;
-            ag.rejectsThisMilestone = 0;
         }
 
+        // --- 2. EFFECTS (Pindahkan Semua Pembersihan ke Sini, SEBELUM Transfer) ---
+        // Bersihkan metadata untuk SEMUA tipe pembayaran di satu tempat
+        ag.currentProofURI = "";
+        ag.submittedAt = 0;
+        ag.firstSubmittedAt = 0;
+        ag.rejectsThisMilestone = 0;
+
         if (payAmount > 0) {
+            // Update saldo yang dirilis SEBELUM melakukan transfer (Sangat Penting untuk CEI)
             ag.amountReleased += payAmount;
+
+            // --- 3. INTERACTIONS (Transfer Selalu Terakhir) ---
             IERC20(ag.token).safeTransfer(ag.freelancer, payAmount);
             emit PaymentReleased(_id, payAmount);
         }
 
-        if (ag.paymentType == PType.Monthly) {
-            ag.currentProofURI = "";
-            ag.submittedAt = 0;
-            ag.firstSubmittedAt = 0;
-            ag.rejectsThisMilestone = 0;
-        }
-
+        // Emit event penyelesaian di akhir
         if (ag.status == Status.Completed) {
             emit AgreementCompleted(_id);
         }
